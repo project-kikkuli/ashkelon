@@ -17,6 +17,7 @@ fn builtin_upstream(name: &str) -> Option<&'static str> {
         "openai" => Some("https://api.openai.com"),
         "chatgpt" => Some("https://chatgpt.com"),
         "openrouter" => Some("https://openrouter.ai"),
+        "opencode" => Some("https://opencode.ai"),
         _ => None,
     }
 }

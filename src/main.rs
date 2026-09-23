@@ -49,9 +49,6 @@ async fn serve(cfg: Arc<ashkelon::config::Config>) -> anyhow::Result<()> {
     let listener = tokio::net::TcpListener::bind(&addr).await.with_context(|| format!("binding {addr}"))?;
     let engine = ashkelon::hooks::Engine::new(cfg.clone());
 
-    // Wired once the hooks shard adds `Engine::start(&Arc<Engine>)` (starts its background hook
-    // loop); delete this gate then.
-    #[cfg(any())]
     ashkelon::hooks::Engine::start(&engine);
 
     ashkelon::relay::serve(cfg, listener, engine).await
@@ -66,7 +63,6 @@ async fn run(cfg: Arc<ashkelon::config::Config>, harness: &str, args: &[String])
 
     let engine = ashkelon::hooks::Engine::new(cfg.clone());
 
-    #[cfg(any())]
     ashkelon::hooks::Engine::start(&engine);
 
     let relay_engine = engine.clone();

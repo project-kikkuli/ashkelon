@@ -1,15 +1,17 @@
 use super::{CompanionProcess, LaunchPlan, COMPANION_URL_PLACEHOLDER};
 
-/// opencode's built-in Anthropic provider reads `ANTHROPIC_BASE_URL` directly; OpenAI/OpenRouter
-/// (AI-SDK providers) only take a `baseURL` from `provider.<id>.options` in config, hence the
-/// temp `OPENCODE_CONFIG` overlay alongside the env var.
+/// opencode's providers are AI-SDK providers whose `baseURL` (including the `/v1` segment) comes from
+/// `provider.<id>.options` in config, so a temp `OPENCODE_CONFIG` overlay points each at the relay.
+/// `opencode` is OpenCode Zen, its own hosted gateway.
 pub fn plan(relay_base: &str, launch: &str, args: &[String]) -> anyhow::Result<LaunchPlan> {
     let mut plan = LaunchPlan::new("opencode", "opencode");
 
     let config = serde_json::json!({
         "provider": {
-            "openai": { "options": { "baseURL": format!("{relay_base}/openai") } },
-            "openrouter": { "options": { "baseURL": format!("{relay_base}/openrouter") } },
+            "anthropic": { "options": { "baseURL": format!("{relay_base}/anthropic/v1") } },
+            "openai": { "options": { "baseURL": format!("{relay_base}/openai/v1") } },
+            "openrouter": { "options": { "baseURL": format!("{relay_base}/openrouter/api/v1") } },
+            "opencode": { "options": { "baseURL": format!("{relay_base}/opencode/zen/v1") } },
         }
     });
     let config_path = std::env::temp_dir().join(format!("ashkelon-{launch}-opencode-config.json"));
@@ -40,8 +42,19 @@ pub fn plan(relay_base: &str, launch: &str, args: &[String]) -> anyhow::Result<L
             .expect("static regex"),
     });
 
-    plan.args = vec!["attach".to_string(), COMPANION_URL_PLACEHOLDER.to_string()];
-    plan.args.extend(args.iter().cloned());
+    // `opencode run ...` (headless) takes `--attach`; everything else is the TUI via `opencode attach`.
+    plan.args = match args.split_first() {
+        Some((first, rest)) if first == "run" => {
+            let mut a = vec!["run".to_string(), "--attach".to_string(), COMPANION_URL_PLACEHOLDER.to_string()];
+            a.extend(rest.iter().cloned());
+            a
+        }
+        _ => {
+            let mut a = vec!["attach".to_string(), COMPANION_URL_PLACEHOLDER.to_string()];
+            a.extend(args.iter().cloned());
+            a
+        }
+    };
     plan.wake.control = Some(COMPANION_URL_PLACEHOLDER.to_string());
     Ok(plan)
 }

@@ -63,8 +63,8 @@ pub async fn run_hook(
         }
     };
 
-    let mut cmd = tokio::process::Command::new(program);
-    cmd.args(args);
+    let mut cmd = tokio::process::Command::new(super::matching::expand_tilde(program));
+    cmd.args(args.iter().map(|a| if a.starts_with('~') { super::matching::expand_tilde(a).into_os_string() } else { a.into() }));
     cmd.current_dir(cwd.map(Path::to_path_buf).unwrap_or_else(fallback_dir));
     cmd.stdin(std::process::Stdio::piped());
     cmd.stdout(std::process::Stdio::piped());

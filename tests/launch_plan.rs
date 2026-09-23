@@ -60,8 +60,10 @@ fn opencode_writes_temp_config_and_defers_control_to_companion() {
     assert_eq!(plan.temp_files.len(), 1);
     let config_text = std::fs::read_to_string(&plan.temp_files[0]).unwrap();
     let config: serde_json::Value = serde_json::from_str(&config_text).unwrap();
-    assert_eq!(config["provider"]["openai"]["options"]["baseURL"], format!("{BASE}/openai"));
-    assert_eq!(config["provider"]["openrouter"]["options"]["baseURL"], format!("{BASE}/openrouter"));
+    assert_eq!(config["provider"]["anthropic"]["options"]["baseURL"], format!("{BASE}/anthropic/v1"));
+    assert_eq!(config["provider"]["openai"]["options"]["baseURL"], format!("{BASE}/openai/v1"));
+    assert_eq!(config["provider"]["openrouter"]["options"]["baseURL"], format!("{BASE}/openrouter/api/v1"));
+    assert_eq!(config["provider"]["opencode"]["options"]["baseURL"], format!("{BASE}/opencode/zen/v1"));
     std::fs::remove_file(&plan.temp_files[0]).unwrap();
 
     let companion = plan.companion.as_ref().unwrap();
@@ -120,4 +122,13 @@ fn unknown_harness_lists_supported_ones() {
     assert!(message.contains("claude"));
     assert!(message.contains("codex"));
     assert!(message.contains("opencode"));
+}
+
+#[test]
+fn opencode_headless_run_attaches_with_flag() {
+    let plan = launch::plan("opencode", BASE, "opencode-test-2", &["run".to_string(), "hello".to_string()]).unwrap();
+    assert_eq!(plan.args, vec!["run", "--attach", COMPANION_URL_PLACEHOLDER, "hello"]);
+    for f in &plan.temp_files {
+        let _ = std::fs::remove_file(f);
+    }
 }
