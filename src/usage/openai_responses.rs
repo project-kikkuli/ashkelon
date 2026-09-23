@@ -96,7 +96,7 @@ impl ResponsesSink {
                 self.consume_output_item(item, false);
             }
         }
-        if let Some(err) = resp.get("error") {
+        if let Some(err) = resp.get("error").filter(|e| !e.is_null()) {
             self.error = Some(extract_error_message(err));
         }
     }
@@ -126,7 +126,7 @@ impl EventSink for ResponsesSink {
                     self.consume_terminal_response(resp);
                 }
                 if ty == "response.failed" {
-                    if let Some(err) = value.get("error") {
+                    if let Some(err) = value.get("error").filter(|e| !e.is_null()) {
                         self.error = Some(extract_error_message(err));
                     } else if self.error.is_none() {
                         self.error = Some("response failed".to_string());
@@ -154,7 +154,7 @@ impl EventSink for ResponsesSink {
                 self.consume_output_item(item, true);
             }
         }
-        if let Some(err) = value.get("error") {
+        if let Some(err) = value.get("error").filter(|e| !e.is_null()) {
             self.error = Some(extract_error_message(err));
         }
     }

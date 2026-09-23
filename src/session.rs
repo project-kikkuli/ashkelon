@@ -67,6 +67,10 @@ fn session_id(wire: Wire, headers: &HeaderMap, body: &[u8]) -> String {
 fn anthropic_metadata_session(body: &[u8]) -> Option<String> {
     let json: serde_json::Value = serde_json::from_slice(body).ok()?;
     let user_id = json.get("metadata")?.get("user_id")?.as_str()?;
+    // Newer clients encode user_id as a JSON object; older ones as `user_..._session_<id>`.
+    if let Ok(serde_json::Value::Object(obj)) = serde_json::from_str::<serde_json::Value>(user_id) {
+        return obj.get("session_id").and_then(|v| v.as_str()).filter(|s| !s.is_empty()).map(str::to_string);
+    }
     let idx = user_id.find("session_")?;
     let rest = &user_id[idx + "session_".len()..];
     let id: String = rest
@@ -181,6 +185,12 @@ mod tests {
         let body = br#"{"metadata":{"user_id":"user_abc-session_xyz123"},"messages":[]}"#;
         let key = derive(None, Wire::AnthropicMessages, &headers(), body);
         assert_eq!(key.session, "xyz123");
+    }
+
+    #[test]
+    fn session_id_from_json_encoded_anthropic_metadata() {
+        let body = br#"{"metadata":{"user_id":"{\"device_id\":\"d1\",\"session_id\":\"0b7c-44\"}"},"messages":[]}"#;
+        assert_eq!(session_id(Wire::AnthropicMessages, &HeaderMap::new(), body), "0b7c-44");
     }
 
     #[test]

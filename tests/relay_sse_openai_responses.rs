@@ -49,6 +49,6 @@ async fn forwards_openai_responses_sse_with_encrypted_reasoning_untouched() {
     let records = wait_for_records(log_dir.path(), 1).await;
     assert_eq!(records.len(), 1);
     let record = &records[0];
-    assert_eq!(record["wire"], "open_ai_responses");
+    assert_eq!(record["wire"], "openai_responses");
     assert_eq!(record["status"], 200);
 }

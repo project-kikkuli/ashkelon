@@ -5,7 +5,9 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "snake_case")]
 pub enum Wire {
     AnthropicMessages,
+    #[serde(rename = "openai_responses")]
     OpenAiResponses,
+    #[serde(rename = "openai_chat")]
     OpenAiChat,
     /// Anything else (model lists, auth probes): relayed, never parsed or rewritten.
     Opaque,

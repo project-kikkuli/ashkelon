@@ -61,7 +61,7 @@ impl EventSink for ChatSink {
     fn on_event(&mut self, event_type: Option<&str>, data: &str) {
         let _ = event_type;
         let Some(value) = parse_event_json(data) else { return };
-        if let Some(err) = value.get("error") {
+        if let Some(err) = value.get("error").filter(|e| !e.is_null()) {
             self.error = Some(extract_error_message(err));
             return;
         }
@@ -98,7 +98,7 @@ impl EventSink for ChatSink {
 
     fn on_body(&mut self, body: &[u8]) {
         let Ok(value) = serde_json::from_slice::<Value>(body) else { return };
-        if let Some(err) = value.get("error") {
+        if let Some(err) = value.get("error").filter(|e| !e.is_null()) {
             self.error = Some(extract_error_message(err));
             return;
         }

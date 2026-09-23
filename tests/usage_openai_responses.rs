@@ -154,3 +154,12 @@ fn garbage_input_never_panics() {
     assert_eq!(tail, "");
     assert_eq!(summary, Summary::default());
 }
+
+#[test]
+fn completed_response_with_null_error_is_not_an_error() {
+    let mut p = ashkelon::usage::parser_for(ashkelon::wire::Wire::OpenAiResponses).unwrap();
+    p.feed(b"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"r1\",\"model\":\"m\",\"status\":\"completed\",\"error\":null,\"output\":[],\"usage\":{\"input_tokens\":3,\"output_tokens\":1}}}\n\n");
+    let s = p.finish();
+    assert_eq!(s.error, None);
+    assert!(s.turn_end);
+}
