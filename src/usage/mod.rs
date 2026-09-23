@@ -2,6 +2,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::wire::Wire;
 
+mod anthropic;
+mod common;
+mod openai_chat;
+mod openai_responses;
+mod sse;
+
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Usage {
     pub input_tokens: Option<u64>,
@@ -43,6 +49,28 @@ pub trait ResponseParser: Send {
     fn output_text_tail(&self) -> &str;
 }
 
-pub fn parser_for(_wire: Wire) -> Option<Box<dyn ResponseParser>> {
-    None
+pub fn parser_for(wire: Wire) -> Option<Box<dyn ResponseParser>> {
+    match wire {
+        Wire::AnthropicMessages => Some(Box::new(anthropic::AnthropicParser::new())),
+        Wire::OpenAiResponses => Some(Box::new(openai_responses::ResponsesParser::new())),
+        Wire::OpenAiChat => Some(Box::new(openai_chat::ChatParser::new())),
+        Wire::Opaque => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn opaque_has_no_parser() {
+        assert!(parser_for(Wire::Opaque).is_none());
+    }
+
+    #[test]
+    fn every_real_wire_has_a_parser() {
+        assert!(parser_for(Wire::AnthropicMessages).is_some());
+        assert!(parser_for(Wire::OpenAiResponses).is_some());
+        assert!(parser_for(Wire::OpenAiChat).is_some());
+    }
 }
