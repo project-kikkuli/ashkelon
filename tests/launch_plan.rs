@@ -256,13 +256,20 @@ fn opencode_companion_url_resolves_into_args_and_wake_control() {
 // live in `tests/launch_omp.rs` where that env var is guarded — never here, to avoid ever
 // touching the real `~/.omp/agent` from an unguarded test in this file.
 
+// Regression: `ori`'s own base-URL resolver (`strings`-read out of the installed binary, see
+// launch::ori's doc comment) only fills in `/api/v1` when the given path is empty or exactly
+// `/api` — any other path, including ours, is used verbatim. Live-reproduced: without this
+// suffix, `ori hermes --model ... -- --provider openrouter` fetched the *marketing* HTML page
+// at `openrouter.ai/models` through the relay (200, but not the API) and then failed the
+// actual completion with a bogus "model not found"; with it, both the catalog fetch and the
+// real `POST .../chat/completions` land correctly and a real free-model prompt answers.
 #[test]
-fn ori_routes_openrouter_without_api_v1_suffix() {
+fn ori_routes_openrouter_with_api_v1_suffix() {
     let dir = state_dir("ori-base");
     let plan = launch::plan("ori", BASE, LAUNCH, &[], &options(&dir)).unwrap();
     assert_eq!(
         env_value(&plan.env, "ORI_OPENROUTER_BASE_URL"),
-        Some(format!("{BASE}/openrouter").as_str())
+        Some(format!("{BASE}/openrouter/api/v1").as_str())
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
