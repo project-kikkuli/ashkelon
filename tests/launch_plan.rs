@@ -126,7 +126,7 @@ fn unknown_harness_lists_supported_ones() {
 
 #[test]
 fn opencode_headless_run_attaches_with_flag() {
-    let plan = launch::plan("opencode", BASE, "opencode-test-2", &["run".to_string(), "hello".to_string()]).unwrap();
+    let plan = launch::plan("opencode", BASE, "opencode-test-3", &["run".to_string(), "hello".to_string()]).unwrap();
     assert_eq!(plan.args, vec!["run", "--attach", COMPANION_URL_PLACEHOLDER, "hello"]);
     for f in &plan.temp_files {
         let _ = std::fs::remove_file(f);
