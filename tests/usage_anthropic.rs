@@ -32,16 +32,31 @@ fn streaming_text_and_tool_use_with_exact_reasoning() {
         "message_start",
         r#"{"type":"message_start","message":{"id":"msg_1","model":"claude-x","role":"assistant","content":[],"stop_reason":null,"usage":{"input_tokens":10,"cache_creation_input_tokens":2,"cache_read_input_tokens":3,"output_tokens":1}}}"#,
     );
-    stream += &sse_event("content_block_start", r#"{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}"#);
-    stream += &sse_event("content_block_delta", r#"{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello "}}"#);
-    stream += &sse_event("content_block_delta", r#"{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"world"}}"#);
+    stream += &sse_event(
+        "content_block_start",
+        r#"{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}"#,
+    );
+    stream += &sse_event(
+        "content_block_delta",
+        r#"{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello "}}"#,
+    );
+    stream += &sse_event(
+        "content_block_delta",
+        r#"{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"world"}}"#,
+    );
     stream += &sse_event("content_block_stop", r#"{"type":"content_block_stop","index":0}"#);
     stream += &sse_event(
         "content_block_start",
         r#"{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu_1","name":"get_weather","input":{}}}"#,
     );
-    stream += &sse_event("content_block_delta", r#"{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"loc"}}"#);
-    stream += &sse_event("content_block_delta", r#"{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"ation\":\"NYC\"}"}}"#);
+    stream += &sse_event(
+        "content_block_delta",
+        r#"{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"loc"}}"#,
+    );
+    stream += &sse_event(
+        "content_block_delta",
+        r#"{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"ation\":\"NYC\"}"}}"#,
+    );
     stream += &sse_event("content_block_stop", r#"{"type":"content_block_stop","index":1}"#);
     stream += &sse_event(
         "message_delta",
@@ -80,15 +95,36 @@ fn streaming_thinking_is_estimated_and_excluded_from_visible_text() {
         "message_start",
         r#"{"type":"message_start","message":{"id":"msg_2","model":"claude-y","role":"assistant","content":[],"stop_reason":null,"usage":{"input_tokens":5,"output_tokens":1}}}"#,
     );
-    stream += &sse_event("content_block_start", r#"{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}"#);
-    stream += &sse_event("content_block_delta", r#"{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"Let me think"}}"#);
-    stream += &sse_event("content_block_delta", r#"{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" about this problem"}}"#);
-    stream += &sse_event("content_block_delta", r#"{"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"deadbeef"}}"#);
+    stream += &sse_event(
+        "content_block_start",
+        r#"{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}"#,
+    );
+    stream += &sse_event(
+        "content_block_delta",
+        r#"{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"Let me think"}}"#,
+    );
+    stream += &sse_event(
+        "content_block_delta",
+        r#"{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" about this problem"}}"#,
+    );
+    stream += &sse_event(
+        "content_block_delta",
+        r#"{"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"deadbeef"}}"#,
+    );
     stream += &sse_event("content_block_stop", r#"{"type":"content_block_stop","index":0}"#);
-    stream += &sse_event("content_block_start", r#"{"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}"#);
-    stream += &sse_event("content_block_delta", r#"{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"The answer is 42."}}"#);
+    stream += &sse_event(
+        "content_block_start",
+        r#"{"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}"#,
+    );
+    stream += &sse_event(
+        "content_block_delta",
+        r#"{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"The answer is 42."}}"#,
+    );
     stream += &sse_event("content_block_stop", r#"{"type":"content_block_stop","index":1}"#);
-    stream += &sse_event("message_delta", r#"{"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":15}}"#);
+    stream += &sse_event(
+        "message_delta",
+        r#"{"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":15}}"#,
+    );
     stream += &sse_event("message_stop", r#"{"type":"message_stop"}"#);
 
     let (summary, _output_chars, _tail) = run(&[stream.as_bytes()]);
@@ -128,7 +164,10 @@ fn non_streamed_body_is_detected_by_leading_brace() {
 
 #[test]
 fn streaming_provider_error_event_is_recorded() {
-    let stream = sse_event("error", r#"{"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}"#);
+    let stream = sse_event(
+        "error",
+        r#"{"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}"#,
+    );
     let (summary, _, _) = run(&[stream.as_bytes()]);
     assert_eq!(summary.error.as_deref(), Some("Overloaded"));
 }
@@ -147,10 +186,19 @@ fn chunk_split_at_every_byte_offset_agrees_with_whole_stream() {
         "message_start",
         r#"{"type":"message_start","message":{"id":"msg_9","model":"claude-x","usage":{"input_tokens":1,"output_tokens":1}}}"#,
     );
-    stream += &sse_event("content_block_start", r#"{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}"#);
-    stream += &sse_event("content_block_delta", r#"{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"abc"}}"#);
+    stream += &sse_event(
+        "content_block_start",
+        r#"{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}"#,
+    );
+    stream += &sse_event(
+        "content_block_delta",
+        r#"{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"abc"}}"#,
+    );
     stream += &sse_event("content_block_stop", r#"{"type":"content_block_stop","index":0}"#);
-    stream += &sse_event("message_delta", r#"{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":3}}"#);
+    stream += &sse_event(
+        "message_delta",
+        r#"{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":3}}"#,
+    );
     stream += &sse_event("message_stop", r#"{"type":"message_stop"}"#);
 
     let (whole, _, _) = run(&[stream.as_bytes()]);
@@ -173,8 +221,14 @@ fn garbage_input_never_panics_and_records_no_error() {
 fn malformed_json_events_are_ignored_but_valid_ones_still_land() {
     let mut stream = String::new();
     stream += "event: content_block_delta\ndata: not json at all {{{\n\n";
-    stream += &sse_event("content_block_start", r#"{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}"#);
-    stream += &sse_event("content_block_delta", r#"{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"ok"}}"#);
+    stream += &sse_event(
+        "content_block_start",
+        r#"{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}"#,
+    );
+    stream += &sse_event(
+        "content_block_delta",
+        r#"{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"ok"}}"#,
+    );
     let (summary, _, _) = run(&[stream.as_bytes()]);
     assert_eq!(summary.text, "ok");
     assert!(summary.error.is_none());

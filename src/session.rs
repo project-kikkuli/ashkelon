@@ -14,8 +14,12 @@ pub struct SessionKey {
     pub session: String,
 }
 
-const SESSION_HEADERS: &[&str] =
-    &["session_id", "x-session-id", "conversation_id", "x-claude-code-session-id"];
+const SESSION_HEADERS: &[&str] = &[
+    "session_id",
+    "x-session-id",
+    "conversation_id",
+    "x-claude-code-session-id",
+];
 
 /// Identifies one agent conversation from a request. `body` is the decoded (uncompressed) body.
 pub fn derive(launch: Option<&str>, wire: Wire, headers: &HeaderMap, body: &[u8]) -> SessionKey {
@@ -27,7 +31,11 @@ pub fn derive(launch: Option<&str>, wire: Wire, headers: &HeaderMap, body: &[u8]
 }
 
 fn harness_from_user_agent(headers: &HeaderMap) -> Option<String> {
-    let ua = headers.get(http::header::USER_AGENT)?.to_str().ok()?.to_ascii_lowercase();
+    let ua = headers
+        .get(http::header::USER_AGENT)?
+        .to_str()
+        .ok()?
+        .to_ascii_lowercase();
     if ua.contains("claude-cli") {
         Some("claude".to_string())
     } else if ua.contains("codex") {
@@ -69,7 +77,11 @@ fn anthropic_metadata_session(body: &[u8]) -> Option<String> {
     let user_id = json.get("metadata")?.get("user_id")?.as_str()?;
     // Newer clients encode user_id as a JSON object; older ones as `user_..._session_<id>`.
     if let Ok(serde_json::Value::Object(obj)) = serde_json::from_str::<serde_json::Value>(user_id) {
-        return obj.get("session_id").and_then(|v| v.as_str()).filter(|s| !s.is_empty()).map(str::to_string);
+        return obj
+            .get("session_id")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(str::to_string);
     }
     let idx = user_id.find("session_")?;
     let rest = &user_id[idx + "session_".len()..];
@@ -110,7 +122,10 @@ fn extract_opening(wire: Wire, body: &[u8]) -> (String, String) {
             let first_user = json
                 .get("messages")
                 .and_then(|m| m.as_array())
-                .and_then(|arr| arr.iter().find(|m| m.get("role").and_then(|r| r.as_str()) == Some("user")))
+                .and_then(|arr| {
+                    arr.iter()
+                        .find(|m| m.get("role").and_then(|r| r.as_str()) == Some("user"))
+                })
                 .map(|m| value_text(m.get("content")))
                 .unwrap_or_default();
             (system, first_user)
@@ -131,11 +146,17 @@ fn extract_opening(wire: Wire, body: &[u8]) -> (String, String) {
         Wire::OpenAiChat => {
             let messages = json.get("messages").and_then(|m| m.as_array());
             let system = messages
-                .and_then(|arr| arr.iter().find(|m| m.get("role").and_then(|r| r.as_str()) == Some("system")))
+                .and_then(|arr| {
+                    arr.iter()
+                        .find(|m| m.get("role").and_then(|r| r.as_str()) == Some("system"))
+                })
                 .map(|m| value_text(m.get("content")))
                 .unwrap_or_default();
             let first_user = messages
-                .and_then(|arr| arr.iter().find(|m| m.get("role").and_then(|r| r.as_str()) == Some("user")))
+                .and_then(|arr| {
+                    arr.iter()
+                        .find(|m| m.get("role").and_then(|r| r.as_str()) == Some("user"))
+                })
                 .map(|m| value_text(m.get("content")))
                 .unwrap_or_default();
             (system, first_user)

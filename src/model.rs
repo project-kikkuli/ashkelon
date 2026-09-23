@@ -2,12 +2,13 @@ use crate::config::{Config, ModelConfig};
 
 /// Calls a model from `[[models]]` for a hook. Returns the response text.
 pub async fn complete(cfg: &Config, name: &str, system: Option<&str>, prompt: &str) -> anyhow::Result<String> {
-    let model = cfg.models.iter().find(|m| m.name == name).ok_or_else(|| anyhow::anyhow!("no such model: {name}"))?;
+    let model = cfg
+        .models
+        .iter()
+        .find(|m| m.name == name)
+        .ok_or_else(|| anyhow::anyhow!("no such model: {name}"))?;
     let api_key = match &model.api_key_env {
-        Some(var) => Some(
-            std::env::var(var)
-                .map_err(|_| anyhow::anyhow!("model {name}: {var} is not set"))?,
-        ),
+        Some(var) => Some(std::env::var(var).map_err(|_| anyhow::anyhow!("model {name}: {var} is not set"))?),
         None => None,
     };
     let client = reqwest::Client::new();
@@ -132,5 +133,8 @@ async fn complete_openai_chat(
         anyhow::bail!("openai_chat model {name}: {status}: {text}", name = model.name);
     }
     let v: serde_json::Value = serde_json::from_str(&text)?;
-    Ok(v["choices"][0]["message"]["content"].as_str().unwrap_or_default().to_string())
+    Ok(v["choices"][0]["message"]["content"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string())
 }

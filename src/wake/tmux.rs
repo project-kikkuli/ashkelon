@@ -10,12 +10,23 @@ fn literal(text: &str) -> String {
 /// error) when either invocation fails, e.g. the pane no longer exists.
 pub async fn send(runner: &dyn CommandRunner, pane: &str, text: &str) -> anyhow::Result<bool> {
     let literal_text = literal(text);
-    let type_args = vec!["send-keys".to_string(), "-t".to_string(), pane.to_string(), "-l".to_string(), literal_text];
+    let type_args = vec![
+        "send-keys".to_string(),
+        "-t".to_string(),
+        pane.to_string(),
+        "-l".to_string(),
+        literal_text,
+    ];
     let typed = runner.run("tmux", &type_args).await?;
     if !typed.success {
         return Ok(false);
     }
-    let enter_args = vec!["send-keys".to_string(), "-t".to_string(), pane.to_string(), "Enter".to_string()];
+    let enter_args = vec![
+        "send-keys".to_string(),
+        "-t".to_string(),
+        pane.to_string(),
+        "Enter".to_string(),
+    ];
     let entered = runner.run("tmux", &enter_args).await?;
     Ok(entered.success)
 }

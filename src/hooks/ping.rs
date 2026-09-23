@@ -14,7 +14,11 @@ impl Ping {
     pub fn new(hook: &str, message: &str, fix: Option<&str>) -> Ping {
         let id = ping_id(hook, message);
         let text = format_ping(hook, &id, message, fix);
-        Ping { id, hook: hook.to_string(), text }
+        Ping {
+            id,
+            hook: hook.to_string(),
+            text,
+        }
     }
 }
 
@@ -49,6 +53,9 @@ pub fn fingerprint(text: &str) -> String {
 }
 
 pub fn into_pinned(ping: &Ping, anchor: usize) -> PinnedPing {
-    PinnedPing { id: ping.id.clone(), anchor, text: ping.text.clone() }
+    PinnedPing {
+        id: ping.id.clone(),
+        anchor,
+        text: ping.text.clone(),
+    }
 }
-

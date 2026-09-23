@@ -21,7 +21,10 @@ impl ResponseParser for FakeParser {
     }
 
     fn finish(self: Box<Self>) -> Summary {
-        Summary { text: self.text, ..Summary::default() }
+        Summary {
+            text: self.text,
+            ..Summary::default()
+        }
     }
 
     fn output_chars(&self) -> usize {
@@ -34,12 +37,18 @@ impl ResponseParser for FakeParser {
 }
 
 fn cut_pattern(name: &str, pattern: &str) -> CutPattern {
-    CutPattern { name: name.to_string(), pattern: pattern.to_string() }
+    CutPattern {
+        name: name.to_string(),
+        pattern: pattern.to_string(),
+    }
 }
 
 #[test]
 fn stream_guard_allows_output_under_the_char_cap() {
-    let cfg = RuleConfig { max_response_chars: Some(10), ..RuleConfig::default() };
+    let cfg = RuleConfig {
+        max_response_chars: Some(10),
+        ..RuleConfig::default()
+    };
     let mut guard = StreamGuard::new(&cfg);
     let mut parser = FakeParser::new();
     parser.feed(b"short");
@@ -48,7 +57,10 @@ fn stream_guard_allows_output_under_the_char_cap() {
 
 #[test]
 fn stream_guard_cuts_once_output_exceeds_the_char_cap() {
-    let cfg = RuleConfig { max_response_chars: Some(5), ..RuleConfig::default() };
+    let cfg = RuleConfig {
+        max_response_chars: Some(5),
+        ..RuleConfig::default()
+    };
     let mut guard = StreamGuard::new(&cfg);
     let mut parser = FakeParser::new();
     parser.feed(b"1234");
@@ -59,7 +71,10 @@ fn stream_guard_cuts_once_output_exceeds_the_char_cap() {
 
 #[test]
 fn stream_guard_only_reports_a_rule_once() {
-    let cfg = RuleConfig { max_response_chars: Some(2), ..RuleConfig::default() };
+    let cfg = RuleConfig {
+        max_response_chars: Some(2),
+        ..RuleConfig::default()
+    };
     let mut guard = StreamGuard::new(&cfg);
     let mut parser = FakeParser::new();
     parser.feed(b"abcdefgh");
@@ -70,7 +85,10 @@ fn stream_guard_only_reports_a_rule_once() {
 
 #[test]
 fn stream_guard_cuts_on_a_matching_cut_pattern() {
-    let cfg = RuleConfig { cut_patterns: vec![cut_pattern("leak", r"BEGIN PRIVATE KEY")], ..RuleConfig::default() };
+    let cfg = RuleConfig {
+        cut_patterns: vec![cut_pattern("leak", r"BEGIN PRIVATE KEY")],
+        ..RuleConfig::default()
+    };
     let mut guard = StreamGuard::new(&cfg);
     let mut parser = FakeParser::new();
     parser.feed(b"here is some -----BEGIN PRIVATE KEY----- data");
@@ -157,7 +175,12 @@ fn chat_cut_tail_is_an_error_chunk_followed_by_done() {
 
 #[test]
 fn cut_tail_rule_name_appears_in_every_wire_shape() {
-    for wire in [Wire::AnthropicMessages, Wire::OpenAiResponses, Wire::OpenAiChat, Wire::Opaque] {
+    for wire in [
+        Wire::AnthropicMessages,
+        Wire::OpenAiResponses,
+        Wire::OpenAiChat,
+        Wire::Opaque,
+    ] {
         let bytes = cut_tail(wire, "my_rule");
         let text = String::from_utf8(bytes).unwrap();
         assert!(text.contains("my_rule"), "rule name missing from cut_tail for {wire:?}");

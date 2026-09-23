@@ -53,12 +53,22 @@ pub fn resolve(path: &str, cfg: &Config) -> Option<Parsed> {
         let route = route_and_rest.next().unwrap_or("").to_string();
         let rest = rest_of(route_and_rest.next());
         let upstream = lookup(&route, cfg)?;
-        Some(Parsed { launch: Some(launch), route, upstream, rest })
+        Some(Parsed {
+            launch: Some(launch),
+            route,
+            upstream,
+            rest,
+        })
     } else {
         let route = first.to_string();
         let rest = rest_of(after_first);
         let upstream = lookup(&route, cfg)?;
-        Some(Parsed { launch: None, route, upstream, rest })
+        Some(Parsed {
+            launch: None,
+            route,
+            upstream,
+            rest,
+        })
     }
 }
 
@@ -69,7 +79,10 @@ mod tests {
 
     fn cfg_with_route(name: &str, upstream: &str) -> Config {
         let mut cfg = Config::default();
-        cfg.routes.push(RouteConfig { name: name.to_string(), upstream: upstream.to_string() });
+        cfg.routes.push(RouteConfig {
+            name: name.to_string(),
+            upstream: upstream.to_string(),
+        });
         cfg
     }
 

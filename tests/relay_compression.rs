@@ -41,8 +41,8 @@ async fn gzip_response_reaches_client_unchanged() {
     .await;
     let (relay_addr, log_dir) = spawn_relay(upstream, false).await;
 
-    let client = hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
-        .build_http::<Full<Bytes>>();
+    let client =
+        hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new()).build_http::<Full<Bytes>>();
     let req = Request::builder()
         .method("POST")
         .uri(format!("http://{relay_addr}/test/v1/messages"))
@@ -72,17 +72,24 @@ async fn zstd_request_body_passed_untouched() {
     let upstream = spawn_fake_upstream(move |req: hyper::Request<hyper::body::Incoming>| {
         let received = received_for_handler.clone();
         async move {
-            let encoding = req.headers().get("content-encoding").and_then(|v| v.to_str().ok()).map(str::to_string);
+            let encoding = req
+                .headers()
+                .get("content-encoding")
+                .and_then(|v| v.to_str().ok())
+                .map(str::to_string);
             let body = req.into_body().collect().await.unwrap().to_bytes().to_vec();
             *received.lock().unwrap() = Some((body, encoding));
-            Response::builder().status(StatusCode::OK).body(full_body(Bytes::from_static(b"{}"))).unwrap()
+            Response::builder()
+                .status(StatusCode::OK)
+                .body(full_body(Bytes::from_static(b"{}")))
+                .unwrap()
         }
     })
     .await;
     let (relay_addr, log_dir) = spawn_relay(upstream, false).await;
 
-    let client = hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
-        .build_http::<Full<Bytes>>();
+    let client =
+        hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new()).build_http::<Full<Bytes>>();
     let req = Request::builder()
         .method("POST")
         .uri(format!("http://{relay_addr}/test/v1/messages"))
@@ -97,6 +104,13 @@ async fn zstd_request_body_passed_untouched() {
     wait_for_records(log_dir.path(), 1).await;
 
     let (received_body, received_encoding) = received.lock().unwrap().clone().expect("upstream received a request");
-    assert_eq!(received_body, compressed, "request body must reach upstream byte-for-byte when untouched");
-    assert_eq!(received_encoding.as_deref(), Some("zstd"), "content-encoding must survive when the body is untouched");
+    assert_eq!(
+        received_body, compressed,
+        "request body must reach upstream byte-for-byte when untouched"
+    );
+    assert_eq!(
+        received_encoding.as_deref(),
+        Some("zstd"),
+        "content-encoding must survive when the body is untouched"
+    );
 }

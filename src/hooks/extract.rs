@@ -88,7 +88,10 @@ fn extract_anthropic(msg: &Value) -> Extracted {
 fn extract_openai_responses(item: &Value) -> Extracted {
     let item_type = item.get("type").and_then(Value::as_str).unwrap_or("message");
     if item_type == "function_call_output" || item_type == "custom_tool_call_output" {
-        return Extracted { prompt: None, has_tool_result: true };
+        return Extracted {
+            prompt: None,
+            has_tool_result: true,
+        };
     }
     if item_type != "message" || item.get("role").and_then(Value::as_str) != Some("user") {
         return Extracted::default();
@@ -105,13 +108,19 @@ fn extract_openai_responses(item: &Value) -> Extracted {
         }
         _ => {}
     }
-    Extracted { prompt: (!prompt.is_empty()).then_some(prompt), has_tool_result: false }
+    Extracted {
+        prompt: (!prompt.is_empty()).then_some(prompt),
+        has_tool_result: false,
+    }
 }
 
 fn extract_openai_chat(msg: &Value) -> Extracted {
     let role = msg.get("role").and_then(Value::as_str).unwrap_or("");
     if role == "tool" {
-        return Extracted { prompt: None, has_tool_result: true };
+        return Extracted {
+            prompt: None,
+            has_tool_result: true,
+        };
     }
     if role != "user" {
         return Extracted::default();
@@ -128,6 +137,8 @@ fn extract_openai_chat(msg: &Value) -> Extracted {
         }
         _ => {}
     }
-    Extracted { prompt: (!prompt.is_empty()).then_some(prompt), has_tool_result: false }
+    Extracted {
+        prompt: (!prompt.is_empty()).then_some(prompt),
+        has_tool_result: false,
+    }
 }
-

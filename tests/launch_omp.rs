@@ -40,7 +40,10 @@ fn fixture(name: &str) -> (PathBuf, PathBuf) {
 }
 
 fn options(state_dir: &Path) -> LaunchOptions {
-    LaunchOptions { state_dir: state_dir.to_path_buf(), no_channel: false }
+    LaunchOptions {
+        state_dir: state_dir.to_path_buf(),
+        no_channel: false,
+    }
 }
 
 fn env_value<'a>(env: &'a [(String, String)], key: &str) -> Option<&'a str> {
@@ -54,8 +57,14 @@ fn routes_anthropic_and_openai_as_plain_env_vars() {
 
     let plan = launch::plan("omp", BASE, "omp-basic", &[], &options(&state_dir)).unwrap();
 
-    assert_eq!(env_value(&plan.env, "ANTHROPIC_BASE_URL"), Some(format!("{BASE}/anthropic").as_str()));
-    assert_eq!(env_value(&plan.env, "OPENAI_BASE_URL"), Some(format!("{BASE}/openai/v1").as_str()));
+    assert_eq!(
+        env_value(&plan.env, "ANTHROPIC_BASE_URL"),
+        Some(format!("{BASE}/anthropic").as_str())
+    );
+    assert_eq!(
+        env_value(&plan.env, "OPENAI_BASE_URL"),
+        Some(format!("{BASE}/openai/v1").as_str())
+    );
     // omp does not read OPENROUTER_BASE_URL at all; setting it would be a silent no-op.
     assert!(env_value(&plan.env, "OPENROUTER_BASE_URL").is_none());
 
@@ -77,8 +86,14 @@ fn overrides_openrouter_openai_codex_and_ollama_in_models_yml() {
 
     let models_text = std::fs::read_to_string(overlay.overlay_dir.join("models.yml")).unwrap();
     let models: serde_yaml::Value = serde_yaml::from_str(&models_text).unwrap();
-    assert_eq!(models["providers"]["openrouter"]["baseUrl"], format!("{BASE}/openrouter/api/v1"));
-    assert_eq!(models["providers"]["openai-codex"]["baseUrl"], format!("{BASE}/chatgpt/backend-api"));
+    assert_eq!(
+        models["providers"]["openrouter"]["baseUrl"],
+        format!("{BASE}/openrouter/api/v1")
+    );
+    assert_eq!(
+        models["providers"]["openai-codex"]["baseUrl"],
+        format!("{BASE}/chatgpt/backend-api")
+    );
     assert_eq!(models["providers"]["ollama"]["baseUrl"], format!("{BASE}/ollama/v1"));
 
     let _ = std::fs::remove_dir_all(agent_dir.parent().unwrap());
@@ -100,9 +115,15 @@ fn preexisting_models_yml_entries_and_provider_overrides_are_preserved() {
     let models: serde_yaml::Value = serde_yaml::from_str(&models_text).unwrap();
 
     // The relay override is added...
-    assert_eq!(models["providers"]["openrouter"]["baseUrl"], format!("{BASE}/openrouter/api/v1"));
+    assert_eq!(
+        models["providers"]["openrouter"]["baseUrl"],
+        format!("{BASE}/openrouter/api/v1")
+    );
     // ...without clobbering a sibling key already set on that same provider...
-    assert_eq!(models["providers"]["openrouter"]["compat"]["replayUnsignedThinking"], false);
+    assert_eq!(
+        models["providers"]["openrouter"]["compat"]["replayUnsignedThinking"],
+        false
+    );
     // ...or an unrelated provider entry.
     assert_eq!(models["providers"]["my-custom"]["baseUrl"], "https://example.test");
 
@@ -128,7 +149,10 @@ fn preexisting_agent_dir_entries_are_symlinked_not_copied() {
 
     let sessions_link = overlay.overlay_dir.join("sessions");
     assert!(sessions_link.symlink_metadata().unwrap().file_type().is_symlink());
-    assert_eq!(std::fs::read_to_string(sessions_link.join("existing.json")).unwrap(), "{}");
+    assert_eq!(
+        std::fs::read_to_string(sessions_link.join("existing.json")).unwrap(),
+        "{}"
+    );
 
     let _ = std::fs::remove_dir_all(agent_dir.parent().unwrap());
 }
@@ -138,7 +162,14 @@ fn from_claude_is_no_longer_refused() {
     let (agent_dir, state_dir) = fixture("from-claude");
     let _guard = EnvGuard::set(&agent_dir);
 
-    let plan = launch::plan("omp", BASE, "omp-from-claude", &["--from-claude".to_string()], &options(&state_dir)).unwrap();
+    let plan = launch::plan(
+        "omp",
+        BASE,
+        "omp-from-claude",
+        &["--from-claude".to_string()],
+        &options(&state_dir),
+    )
+    .unwrap();
     assert!(plan.args.contains(&"--from-claude".to_string()));
 
     let _ = std::fs::remove_dir_all(agent_dir.parent().unwrap());
@@ -153,11 +184,18 @@ fn reconcile_moves_back_a_file_omp_materialized_fresh_in_the_overlay() {
     std::fs::write(overlay_dir.join("models.yml"), "generated: true\n").unwrap();
     std::fs::write(overlay_dir.join("new-model-cache.json"), "{\"fresh\":true}").unwrap();
 
-    let overlay = ashkelon::launch::OverlayHome { overlay_dir, real_home: agent_dir.clone(), generated_file_name: "models.yml".to_string() };
+    let overlay = ashkelon::launch::OverlayHome {
+        overlay_dir,
+        real_home: agent_dir.clone(),
+        generated_file_name: "models.yml".to_string(),
+    };
     let moved = launch::reconcile_home_overlay(&overlay).unwrap();
 
     assert_eq!(moved, vec![agent_dir.join("new-model-cache.json")]);
-    assert_eq!(std::fs::read_to_string(agent_dir.join("new-model-cache.json")).unwrap(), "{\"fresh\":true}");
+    assert_eq!(
+        std::fs::read_to_string(agent_dir.join("new-model-cache.json")).unwrap(),
+        "{\"fresh\":true}"
+    );
     assert!(!agent_dir.join("models.yml").exists());
 
     let _ = std::fs::remove_dir_all(agent_dir.parent().unwrap());

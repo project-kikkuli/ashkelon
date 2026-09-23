@@ -18,12 +18,23 @@ fn sse_data(data: &str) -> String {
 #[test]
 fn streaming_tool_calls_assembled_by_index_with_exact_usage() {
     let mut stream = String::new();
-    stream += &sse_data(r#"{"id":"chatcmpl_1","object":"chat.completion.chunk","model":"gpt-y","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}"#);
-    stream += &sse_data(r#"{"id":"chatcmpl_1","choices":[{"index":0,"delta":{"content":"Sure, "},"finish_reason":null}]}"#);
-    stream += &sse_data(r#"{"id":"chatcmpl_1","choices":[{"index":0,"delta":{"content":"let me check."},"finish_reason":null}]}"#);
-    stream += &sse_data(r#"{"id":"chatcmpl_1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"lookup","arguments":""}}]},"finish_reason":null}]}"#);
-    stream += &sse_data(r#"{"id":"chatcmpl_1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"q\":"}}]},"finish_reason":null}]}"#);
-    stream += &sse_data(r#"{"id":"chatcmpl_1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"cats\"}"}}]},"finish_reason":null}]}"#);
+    stream += &sse_data(
+        r#"{"id":"chatcmpl_1","object":"chat.completion.chunk","model":"gpt-y","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}"#,
+    );
+    stream +=
+        &sse_data(r#"{"id":"chatcmpl_1","choices":[{"index":0,"delta":{"content":"Sure, "},"finish_reason":null}]}"#);
+    stream += &sse_data(
+        r#"{"id":"chatcmpl_1","choices":[{"index":0,"delta":{"content":"let me check."},"finish_reason":null}]}"#,
+    );
+    stream += &sse_data(
+        r#"{"id":"chatcmpl_1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"lookup","arguments":""}}]},"finish_reason":null}]}"#,
+    );
+    stream += &sse_data(
+        r#"{"id":"chatcmpl_1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"q\":"}}]},"finish_reason":null}]}"#,
+    );
+    stream += &sse_data(
+        r#"{"id":"chatcmpl_1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"cats\"}"}}]},"finish_reason":null}]}"#,
+    );
     stream += &sse_data(r#"{"id":"chatcmpl_1","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}"#);
     stream += &sse_data(
         r#"{"id":"chatcmpl_1","choices":[],"usage":{"prompt_tokens":50,"prompt_tokens_details":{"cached_tokens":10},"completion_tokens":9,"completion_tokens_details":{"reasoning_tokens":0}}}"#,
@@ -53,10 +64,17 @@ fn streaming_tool_calls_assembled_by_index_with_exact_usage() {
 #[test]
 fn openrouter_reasoning_delta_is_estimated_when_no_exact_count() {
     let mut stream = String::new();
-    stream += &sse_data(r#"{"id":"chatcmpl_2","model":"or-model","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}"#);
-    stream += &sse_data(r#"{"id":"chatcmpl_2","choices":[{"index":0,"delta":{"reasoning":"Thinking really hard"},"finish_reason":null}]}"#);
-    stream += &sse_data(r#"{"id":"chatcmpl_2","choices":[{"index":0,"delta":{"reasoning":" about it"},"finish_reason":null}]}"#);
-    stream += &sse_data(r#"{"id":"chatcmpl_2","choices":[{"index":0,"delta":{"content":"Done."},"finish_reason":null}]}"#);
+    stream += &sse_data(
+        r#"{"id":"chatcmpl_2","model":"or-model","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}"#,
+    );
+    stream += &sse_data(
+        r#"{"id":"chatcmpl_2","choices":[{"index":0,"delta":{"reasoning":"Thinking really hard"},"finish_reason":null}]}"#,
+    );
+    stream += &sse_data(
+        r#"{"id":"chatcmpl_2","choices":[{"index":0,"delta":{"reasoning":" about it"},"finish_reason":null}]}"#,
+    );
+    stream +=
+        &sse_data(r#"{"id":"chatcmpl_2","choices":[{"index":0,"delta":{"content":"Done."},"finish_reason":null}]}"#);
     stream += &sse_data(r#"{"id":"chatcmpl_2","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}"#);
     stream += &sse_data("[DONE]");
 
@@ -105,7 +123,9 @@ fn streaming_error_event_is_recorded() {
 #[test]
 fn chunk_split_at_every_byte_offset_agrees_with_whole_stream() {
     let mut stream = String::new();
-    stream += &sse_data(r#"{"id":"chatcmpl_9","model":"gpt-y","choices":[{"index":0,"delta":{"content":"abc"},"finish_reason":null}]}"#);
+    stream += &sse_data(
+        r#"{"id":"chatcmpl_9","model":"gpt-y","choices":[{"index":0,"delta":{"content":"abc"},"finish_reason":null}]}"#,
+    );
     stream += &sse_data(r#"{"id":"chatcmpl_9","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}"#);
     stream += &sse_data("[DONE]");
 

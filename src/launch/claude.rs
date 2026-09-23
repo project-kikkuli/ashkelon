@@ -24,7 +24,8 @@ use super::{LaunchOptions, LaunchPlan};
 /// unix socket at `<state_dir>/launch/<launch>.sock` (see `wake::claude`).
 pub fn plan(relay_base: &str, launch: &str, args: &[String], options: &LaunchOptions) -> anyhow::Result<LaunchPlan> {
     let mut plan = LaunchPlan::new("claude", "claude");
-    plan.env.push(("ANTHROPIC_BASE_URL".to_string(), format!("{relay_base}/anthropic")));
+    plan.env
+        .push(("ANTHROPIC_BASE_URL".to_string(), format!("{relay_base}/anthropic")));
 
     let no_channel = options.no_channel || args.iter().any(|a| a == "--no-channel");
     let passthrough: Vec<String> = args.iter().filter(|a| a.as_str() != "--no-channel").cloned().collect();

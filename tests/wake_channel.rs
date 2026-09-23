@@ -24,7 +24,10 @@ impl Child {
             .expect("spawning ashkelon channel");
         let stdout = std::io::BufReader::new(process.stdout.take().unwrap());
         use std::io::BufRead;
-        Child { process, stdout: stdout.lines() }
+        Child {
+            process,
+            stdout: stdout.lines(),
+        }
     }
 
     fn send(&mut self, message: &Value) {
@@ -70,7 +73,10 @@ fn handshake_declares_the_channel_capability() {
     let response = child.recv();
     assert_eq!(response["id"], 1);
     assert_eq!(response["result"]["protocolVersion"], "2026-06-18");
-    assert_eq!(response["result"]["capabilities"]["experimental"]["claude/channel"], json!({}));
+    assert_eq!(
+        response["result"]["capabilities"]["experimental"]["claude/channel"],
+        json!({})
+    );
     assert_eq!(response["result"]["serverInfo"]["name"], "ashkelon");
 
     child.send(&json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }));
@@ -79,7 +85,10 @@ fn handshake_declares_the_channel_capability() {
     assert_eq!(child.recv(), json!({ "jsonrpc": "2.0", "id": 2, "result": {} }));
 
     child.send(&json!({ "jsonrpc": "2.0", "id": 3, "method": "tools/list" }));
-    assert_eq!(child.recv(), json!({ "jsonrpc": "2.0", "id": 3, "result": { "tools": [] } }));
+    assert_eq!(
+        child.recv(),
+        json!({ "jsonrpc": "2.0", "id": 3, "result": { "tools": [] } })
+    );
 
     let _ = std::fs::remove_dir_all(&dir);
 }

@@ -86,7 +86,13 @@ pub struct StreamOrBody<S> {
 
 impl<S: EventSink> StreamOrBody<S> {
     pub fn new(sink: S) -> Self {
-        StreamOrBody { mode: Mode::Undetermined, predetect: Vec::new(), json_body: Vec::new(), sse: SseSplitter::new(), sink }
+        StreamOrBody {
+            mode: Mode::Undetermined,
+            predetect: Vec::new(),
+            json_body: Vec::new(),
+            sse: SseSplitter::new(),
+            sink,
+        }
     }
 
     pub fn feed(&mut self, chunk: &[u8]) {
@@ -95,7 +101,11 @@ impl<S: EventSink> StreamOrBody<S> {
             let Some(idx) = self.predetect.iter().position(|b| !b.is_ascii_whitespace()) else {
                 return;
             };
-            self.mode = if self.predetect[idx] == b'{' { Mode::Json } else { Mode::Sse };
+            self.mode = if self.predetect[idx] == b'{' {
+                Mode::Json
+            } else {
+                Mode::Sse
+            };
             let buffered = std::mem::take(&mut self.predetect);
             self.route(&buffered);
             return;

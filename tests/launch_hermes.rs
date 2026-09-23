@@ -51,7 +51,10 @@ fn fixture(name: &str) -> (PathBuf, PathBuf) {
 }
 
 fn options(state_dir: &Path) -> LaunchOptions {
-    LaunchOptions { state_dir: state_dir.to_path_buf(), no_channel: false }
+    LaunchOptions {
+        state_dir: state_dir.to_path_buf(),
+        no_channel: false,
+    }
 }
 
 #[test]
@@ -73,17 +76,29 @@ fn anthropic_with_api_key_routes_through_the_isolated_named_provider() {
 
     let overlaid_text = std::fs::read_to_string(overlay.overlay_dir.join("config.yaml")).unwrap();
     let overlaid: serde_yaml::Value = serde_yaml::from_str(&overlaid_text).unwrap();
-    assert_eq!(overlaid["providers"]["ashkelon-relay"]["api"], format!("{BASE}/anthropic"));
+    assert_eq!(
+        overlaid["providers"]["ashkelon-relay"]["api"],
+        format!("{BASE}/anthropic")
+    );
     assert_eq!(overlaid["providers"]["ashkelon-relay"]["key_env"], "ANTHROPIC_API_KEY");
-    assert_eq!(overlaid["providers"]["ashkelon-relay"]["api_mode"], "anthropic_messages");
+    assert_eq!(
+        overlaid["providers"]["ashkelon-relay"]["api_mode"],
+        "anthropic_messages"
+    );
 
     // The real config.yaml is untouched — only the overlay copy carries the override.
-    assert_eq!(std::fs::read_to_string(home.join("config.yaml")).unwrap(), "model:\n  provider: anthropic\n");
+    assert_eq!(
+        std::fs::read_to_string(home.join("config.yaml")).unwrap(),
+        "model:\n  provider: anthropic\n"
+    );
 
     // Pre-existing entries are symlinked straight through, not copied.
     let sessions_link = overlay.overlay_dir.join("sessions");
     assert!(sessions_link.symlink_metadata().unwrap().file_type().is_symlink());
-    assert_eq!(std::fs::read_to_string(sessions_link.join("existing.json")).unwrap(), "{}");
+    assert_eq!(
+        std::fs::read_to_string(sessions_link.join("existing.json")).unwrap(),
+        "{}"
+    );
 
     let _ = std::fs::remove_dir_all(home.parent().unwrap());
 }
@@ -112,11 +127,20 @@ fn anthropic_key_in_the_real_dotenv_file_is_also_honored() {
     let overlay = plan.overlay_home.as_ref().unwrap();
     let overlaid_text = std::fs::read_to_string(overlay.overlay_dir.join("config.yaml")).unwrap();
     let overlaid: serde_yaml::Value = serde_yaml::from_str(&overlaid_text).unwrap();
-    assert_eq!(overlaid["providers"]["ashkelon-relay"]["api"], format!("{BASE}/anthropic"));
+    assert_eq!(
+        overlaid["providers"]["ashkelon-relay"]["api"],
+        format!("{BASE}/anthropic")
+    );
 
     // The real .env is symlinked through untouched, so Hermes's other env-derived behavior
     // (unrelated to the relayed provider) keeps working.
-    assert!(overlay.overlay_dir.join(".env").symlink_metadata().unwrap().file_type().is_symlink());
+    assert!(overlay
+        .overlay_dir
+        .join(".env")
+        .symlink_metadata()
+        .unwrap()
+        .file_type()
+        .is_symlink());
 
     let _ = std::fs::remove_dir_all(home.parent().unwrap());
 }
@@ -131,7 +155,10 @@ fn openrouter_with_api_key_routes_through_the_isolated_named_provider() {
     let overlay = plan.overlay_home.as_ref().unwrap();
     let overlaid_text = std::fs::read_to_string(overlay.overlay_dir.join("config.yaml")).unwrap();
     let overlaid: serde_yaml::Value = serde_yaml::from_str(&overlaid_text).unwrap();
-    assert_eq!(overlaid["providers"]["ashkelon-relay"]["api"], format!("{BASE}/openrouter/api/v1"));
+    assert_eq!(
+        overlaid["providers"]["ashkelon-relay"]["api"],
+        format!("{BASE}/openrouter/api/v1")
+    );
     assert_eq!(overlaid["providers"]["ashkelon-relay"]["key_env"], "OPENROUTER_API_KEY");
     assert_eq!(overlaid["providers"]["ashkelon-relay"]["api_mode"], "chat_completions");
 
@@ -141,7 +168,11 @@ fn openrouter_with_api_key_routes_through_the_isolated_named_provider() {
 #[test]
 fn a_custom_provider_refuses_with_a_clear_message() {
     let (home, state_dir) = fixture("custom-refuse");
-    std::fs::write(home.join("config.yaml"), "model:\n  provider: custom\n  base_url: https://my-llm.example\n").unwrap();
+    std::fs::write(
+        home.join("config.yaml"),
+        "model:\n  provider: custom\n  base_url: https://my-llm.example\n",
+    )
+    .unwrap();
 
     let _guard = EnvGuard::set(&home, Some("sk-ant-test"), Some("sk-or-test"));
     let err = launch::plan("hermes", BASE, "hermes-custom-refuse", &[], &options(&state_dir)).unwrap_err();
@@ -183,13 +214,23 @@ fn reconcile_moves_back_a_file_hermes_materialized_fresh_in_the_overlay() {
     // Simulate Hermes creating a brand-new top-level file no symlink anticipated.
     std::fs::write(overlay_dir.join("new-cache-file.json"), "{\"fresh\":true}").unwrap();
 
-    let overlay = ashkelon::launch::OverlayHome { overlay_dir: overlay_dir.clone(), real_home: home.clone(), generated_file_name: "config.yaml".to_string() };
+    let overlay = ashkelon::launch::OverlayHome {
+        overlay_dir: overlay_dir.clone(),
+        real_home: home.clone(),
+        generated_file_name: "config.yaml".to_string(),
+    };
     let moved = launch::reconcile_home_overlay(&overlay).unwrap();
 
     assert_eq!(moved, vec![home.join("new-cache-file.json")]);
-    assert_eq!(std::fs::read_to_string(home.join("new-cache-file.json")).unwrap(), "{\"fresh\":true}");
+    assert_eq!(
+        std::fs::read_to_string(home.join("new-cache-file.json")).unwrap(),
+        "{\"fresh\":true}"
+    );
     // ashkelon's own generated config was never copied back over the real one.
-    assert_eq!(std::fs::read_to_string(home.join("config.yaml")).unwrap(), "model:\n  provider: anthropic\n");
+    assert_eq!(
+        std::fs::read_to_string(home.join("config.yaml")).unwrap(),
+        "model:\n  provider: anthropic\n"
+    );
 
     let _ = std::fs::remove_dir_all(home.parent().unwrap());
 }

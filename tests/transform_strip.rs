@@ -8,7 +8,10 @@ fn strip_cfg(rules: Vec<(&str, &str)>) -> TransformConfig {
         tool_output: None,
         strip: rules
             .into_iter()
-            .map(|(name, pattern)| StripRule { name: name.to_string(), pattern: pattern.to_string() })
+            .map(|(name, pattern)| StripRule {
+                name: name.to_string(),
+                pattern: pattern.to_string(),
+            })
             .collect(),
     }
 }
@@ -24,7 +27,11 @@ fn anthropic_user_string_content_is_stripped() {
         "messages": [{"role": "user", "content": "hello SECRET-1234 world"}],
     });
     let cfg = strip_cfg(vec![("drop_secrets", r"SECRET-\d+")]);
-    let applied = apply(Wire::AnthropicMessages, &cfg, serde_json::to_vec(&body).unwrap().as_slice());
+    let applied = apply(
+        Wire::AnthropicMessages,
+        &cfg,
+        serde_json::to_vec(&body).unwrap().as_slice(),
+    );
     assert_eq!(applied.changed, vec!["drop_secrets".to_string()]);
     let out = parse(&applied.body);
     assert_eq!(out["messages"][0]["content"], "hello  world");
@@ -44,7 +51,11 @@ fn anthropic_user_text_block_is_dropped_when_it_becomes_empty() {
         }],
     });
     let cfg = strip_cfg(vec![("drop_secrets", r"^SECRET-1$")]);
-    let applied = apply(Wire::AnthropicMessages, &cfg, serde_json::to_vec(&body).unwrap().as_slice());
+    let applied = apply(
+        Wire::AnthropicMessages,
+        &cfg,
+        serde_json::to_vec(&body).unwrap().as_slice(),
+    );
     assert_eq!(applied.changed, vec!["drop_secrets".to_string()]);
     let out = parse(&applied.body);
     let content = out["messages"][0]["content"].as_array().unwrap();
@@ -86,7 +97,11 @@ fn responses_input_text_is_stripped_and_dropped_when_empty() {
         }],
     });
     let cfg = strip_cfg(vec![("drop_secrets", r"SECRET-1")]);
-    let applied = apply(Wire::OpenAiResponses, &cfg, serde_json::to_vec(&body).unwrap().as_slice());
+    let applied = apply(
+        Wire::OpenAiResponses,
+        &cfg,
+        serde_json::to_vec(&body).unwrap().as_slice(),
+    );
     assert_eq!(applied.changed, vec!["drop_secrets".to_string()]);
     let out = parse(&applied.body);
     let content = out["input"][0]["content"].as_array().unwrap();
@@ -206,7 +221,11 @@ fn anthropic_non_text_blocks_inside_a_user_message_are_never_touched_by_strip() 
         }],
     });
     let cfg = strip_cfg(vec![("drop_secrets", r"SECRET-1")]);
-    let applied = apply(Wire::AnthropicMessages, &cfg, serde_json::to_vec(&body).unwrap().as_slice());
+    let applied = apply(
+        Wire::AnthropicMessages,
+        &cfg,
+        serde_json::to_vec(&body).unwrap().as_slice(),
+    );
     assert_eq!(applied.changed, vec!["drop_secrets".to_string()]);
     let out = parse(&applied.body);
     let content = out["messages"][0]["content"].as_array().unwrap();

@@ -35,7 +35,10 @@ pub fn plan(relay_base: &str, launch: &str, args: &[String], _options: &LaunchOp
     let password = random_token();
 
     let base_env = vec![
-        ("OPENCODE_CONFIG".to_string(), config_path.to_string_lossy().into_owned()),
+        (
+            "OPENCODE_CONFIG".to_string(),
+            config_path.to_string_lossy().into_owned(),
+        ),
         ("ANTHROPIC_BASE_URL".to_string(), format!("{relay_base}/anthropic")),
         ("OPENCODE_SERVER_PASSWORD".to_string(), password.clone()),
     ];
@@ -55,14 +58,17 @@ pub fn plan(relay_base: &str, launch: &str, args: &[String], _options: &LaunchOp
             "--print-logs".to_string(),
         ],
         env: base_env,
-        ready_pattern: regex::Regex::new(r"listening on http://(?P<host>[^:\s]+):(?P<port>\d+)")
-            .expect("static regex"),
+        ready_pattern: regex::Regex::new(r"listening on http://(?P<host>[^:\s]+):(?P<port>\d+)").expect("static regex"),
     });
 
     // `opencode run ...` (headless) takes `--attach`; everything else is the TUI via `opencode attach`.
     plan.args = match args.split_first() {
         Some((first, rest)) if first == "run" => {
-            let mut a = vec!["run".to_string(), "--attach".to_string(), COMPANION_URL_PLACEHOLDER.to_string()];
+            let mut a = vec![
+                "run".to_string(),
+                "--attach".to_string(),
+                COMPANION_URL_PLACEHOLDER.to_string(),
+            ];
             a.extend(rest.iter().cloned());
             a
         }
@@ -72,9 +78,13 @@ pub fn plan(relay_base: &str, launch: &str, args: &[String], _options: &LaunchOp
             a
         }
     };
-    plan.env.push(("OPENCODE_SERVER_PASSWORD".to_string(), password.clone()));
+    plan.env
+        .push(("OPENCODE_SERVER_PASSWORD".to_string(), password.clone()));
     plan.wake.control = Some(COMPANION_URL_PLACEHOLDER.to_string());
-    plan.wake.control_auth = Some(format!("Basic {}", base64::engine::general_purpose::STANDARD.encode(format!("opencode:{password}"))));
+    plan.wake.control_auth = Some(format!(
+        "Basic {}",
+        base64::engine::general_purpose::STANDARD.encode(format!("opencode:{password}"))
+    ));
     Ok(plan)
 }
 

@@ -22,8 +22,8 @@ async fn logs_request_and_response_bodies_when_enabled() {
     let (relay_addr, log_dir) = spawn_relay(upstream, true).await;
 
     const REQUEST: &[u8] = br#"{"model":"claude-x","messages":[{"role":"user","content":"hi"}]}"#;
-    let client = hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
-        .build_http::<Full<Bytes>>();
+    let client =
+        hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new()).build_http::<Full<Bytes>>();
     let req = Request::builder()
         .method("POST")
         .uri(format!("http://{relay_addr}/test/v1/messages"))

@@ -14,10 +14,24 @@ struct FakeRunner {
 
 impl FakeRunner {
     fn succeeding() -> FakeRunner {
-        FakeRunner { calls: Mutex::new(Vec::new()), result: CommandOutput { success: true, stdout: Vec::new(), stderr: Vec::new() } }
+        FakeRunner {
+            calls: Mutex::new(Vec::new()),
+            result: CommandOutput {
+                success: true,
+                stdout: Vec::new(),
+                stderr: Vec::new(),
+            },
+        }
     }
     fn failing() -> FakeRunner {
-        FakeRunner { calls: Mutex::new(Vec::new()), result: CommandOutput { success: false, stdout: Vec::new(), stderr: Vec::new() } }
+        FakeRunner {
+            calls: Mutex::new(Vec::new()),
+            result: CommandOutput {
+                success: false,
+                stdout: Vec::new(),
+                stderr: Vec::new(),
+            },
+        }
     }
 }
 
@@ -50,7 +64,10 @@ impl HttpPoster for FakePoster {
         body: &'a [u8],
         authorization: Option<&'a str>,
     ) -> Pin<Box<dyn Future<Output = anyhow::Result<u16>> + Send + 'a>> {
-        self.post_calls.lock().unwrap().push((url.to_string(), body.to_vec(), authorization.map(str::to_string)));
+        self.post_calls
+            .lock()
+            .unwrap()
+            .push((url.to_string(), body.to_vec(), authorization.map(str::to_string)));
         let status = self.status;
         Box::pin(async move { Ok(status) })
     }
@@ -60,7 +77,10 @@ impl HttpPoster for FakePoster {
         url: &'a str,
         authorization: Option<&'a str>,
     ) -> Pin<Box<dyn Future<Output = anyhow::Result<GetResponse>> + Send + 'a>> {
-        self.get_calls.lock().unwrap().push((url.to_string(), authorization.map(str::to_string)));
+        self.get_calls
+            .lock()
+            .unwrap()
+            .push((url.to_string(), authorization.map(str::to_string)));
         let status = self.status;
         let body = self.get_body.clone();
         Box::pin(async move { Ok(GetResponse { status, body }) })
@@ -68,18 +88,31 @@ impl HttpPoster for FakePoster {
 }
 
 fn target(harness: &str) -> WakeTarget {
-    WakeTarget { harness: harness.to_string(), tmux_pane: None, control: None, control_auth: None, harness_session_id: None }
+    WakeTarget {
+        harness: harness.to_string(),
+        tmux_pane: None,
+        control: None,
+        control_auth: None,
+        harness_session_id: None,
+    }
 }
 
 fn session() -> SessionKey {
-    SessionKey { launch: Some("deadbeef".to_string()), harness: Some("codex".to_string()), session: "s1".to_string() }
+    SessionKey {
+        launch: Some("deadbeef".to_string()),
+        harness: Some("codex".to_string()),
+        session: "s1".to_string(),
+    }
 }
 
 #[tokio::test]
 async fn codex_wakes_via_queue_when_session_id_known() {
     let runner = FakeRunner::succeeding();
     let poster = FakePoster::default();
-    let t = WakeTarget { harness_session_id: Some("thread-1".to_string()), ..target("codex") };
+    let t = WakeTarget {
+        harness_session_id: Some("thread-1".to_string()),
+        ..target("codex")
+    };
 
     let woken = wake_with(&runner, &poster, &t, &session(), "hello").await.unwrap();
 
@@ -107,23 +140,57 @@ async fn codex_falls_back_to_session_key_thread_id() {
 async fn codex_falls_back_to_tmux_when_no_session_id_at_all() {
     let runner = FakeRunner::succeeding();
     let poster = FakePoster::default();
-    let t = WakeTarget { tmux_pane: Some("%3".to_string()), ..target("codex") };
-    let empty_session = SessionKey { launch: None, harness: None, session: String::new() };
+    let t = WakeTarget {
+        tmux_pane: Some("%3".to_string()),
+        ..target("codex")
+    };
+    let empty_session = SessionKey {
+        launch: None,
+        harness: None,
+        session: String::new(),
+    };
 
     let woken = wake_with(&runner, &poster, &t, &empty_session, "hello").await.unwrap();
 
     assert!(woken);
     let calls = runner.calls.lock().unwrap();
     assert_eq!(calls.len(), 2);
-    assert_eq!(calls[0], ("tmux".to_string(), vec!["send-keys".to_string(), "-t".to_string(), "%3".to_string(), "-l".to_string(), "hello".to_string()]));
-    assert_eq!(calls[1], ("tmux".to_string(), vec!["send-keys".to_string(), "-t".to_string(), "%3".to_string(), "Enter".to_string()]));
+    assert_eq!(
+        calls[0],
+        (
+            "tmux".to_string(),
+            vec![
+                "send-keys".to_string(),
+                "-t".to_string(),
+                "%3".to_string(),
+                "-l".to_string(),
+                "hello".to_string()
+            ]
+        )
+    );
+    assert_eq!(
+        calls[1],
+        (
+            "tmux".to_string(),
+            vec![
+                "send-keys".to_string(),
+                "-t".to_string(),
+                "%3".to_string(),
+                "Enter".to_string()
+            ]
+        )
+    );
 }
 
 #[tokio::test]
 async fn codex_queue_failure_falls_back_to_tmux() {
     let runner = FakeRunner::failing();
     let poster = FakePoster::default();
-    let t = WakeTarget { tmux_pane: Some("%3".to_string()), harness_session_id: Some("thread-1".to_string()), ..target("codex") };
+    let t = WakeTarget {
+        tmux_pane: Some("%3".to_string()),
+        harness_session_id: Some("thread-1".to_string()),
+        ..target("codex")
+    };
 
     // The runner is configured to fail every call, including the tmux fallback, so this should
     // end up Ok(false) rather than erroring — but it must still have tried both.
@@ -176,7 +243,10 @@ async fn opencode_discovers_the_most_recently_updated_session_when_id_unknown() 
         .into_bytes(),
         ..Default::default()
     };
-    let t = WakeTarget { control: Some("http://127.0.0.1:54321".to_string()), ..target("opencode") };
+    let t = WakeTarget {
+        control: Some("http://127.0.0.1:54321".to_string()),
+        ..target("opencode")
+    };
 
     let woken = wake_with(&runner, &poster, &t, &session(), "hello").await.unwrap();
 
@@ -189,7 +259,10 @@ async fn opencode_discovers_the_most_recently_updated_session_when_id_unknown() 
 #[tokio::test]
 async fn opencode_non_2xx_falls_back_to_tmux() {
     let runner = FakeRunner::succeeding();
-    let poster = FakePoster { status: 500, ..Default::default() };
+    let poster = FakePoster {
+        status: 500,
+        ..Default::default()
+    };
     let t = WakeTarget {
         tmux_pane: Some("%1".to_string()),
         control: Some("http://127.0.0.1:54321".to_string()),
@@ -207,8 +280,16 @@ async fn opencode_non_2xx_falls_back_to_tmux() {
 #[tokio::test]
 async fn opencode_no_sessions_found_falls_back_to_tmux() {
     let runner = FakeRunner::succeeding();
-    let poster = FakePoster { status: 200, get_body: b"[]".to_vec(), ..Default::default() };
-    let t = WakeTarget { tmux_pane: Some("%1".to_string()), control: Some("http://127.0.0.1:54321".to_string()), ..target("opencode") };
+    let poster = FakePoster {
+        status: 200,
+        get_body: b"[]".to_vec(),
+        ..Default::default()
+    };
+    let t = WakeTarget {
+        tmux_pane: Some("%1".to_string()),
+        control: Some("http://127.0.0.1:54321".to_string()),
+        ..target("opencode")
+    };
 
     let woken = wake_with(&runner, &poster, &t, &session(), "hello").await.unwrap();
 
@@ -233,12 +314,20 @@ async fn claude_wakes_via_channel_socket() {
 
     let runner = FakeRunner::succeeding();
     let poster = FakePoster::default();
-    let t = WakeTarget { control: Some(socket_path.to_string_lossy().into_owned()), ..target("claude") };
+    let t = WakeTarget {
+        control: Some(socket_path.to_string_lossy().into_owned()),
+        ..target("claude")
+    };
 
-    let woken = wake_with(&runner, &poster, &t, &session(), "hello from ashkelon").await.unwrap();
+    let woken = wake_with(&runner, &poster, &t, &session(), "hello from ashkelon")
+        .await
+        .unwrap();
     assert!(woken);
 
-    let received = tokio::time::timeout(std::time::Duration::from_secs(2), accept).await.unwrap().unwrap();
+    let received = tokio::time::timeout(std::time::Duration::from_secs(2), accept)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(received, "hello from ashkelon");
 
     let _ = std::fs::remove_dir_all(&dir);
@@ -264,7 +353,10 @@ async fn claude_missing_socket_falls_back_to_tmux() {
 async fn claude_without_channel_uses_tmux_directly() {
     let runner = FakeRunner::succeeding();
     let poster = FakePoster::default();
-    let t = WakeTarget { tmux_pane: Some("%0".to_string()), ..target("claude") };
+    let t = WakeTarget {
+        tmux_pane: Some("%0".to_string()),
+        ..target("claude")
+    };
 
     let woken = wake_with(&runner, &poster, &t, &session(), "hi").await.unwrap();
 
@@ -290,9 +382,14 @@ async fn nothing_applies_returns_false_without_running_anything() {
 async fn tmux_collapses_newlines_to_spaces() {
     let runner = FakeRunner::succeeding();
     let poster = FakePoster::default();
-    let t = WakeTarget { tmux_pane: Some("%2".to_string()), ..target("claude") };
+    let t = WakeTarget {
+        tmux_pane: Some("%2".to_string()),
+        ..target("claude")
+    };
 
-    wake_with(&runner, &poster, &t, &session(), "line one\nline two\r\nline three").await.unwrap();
+    wake_with(&runner, &poster, &t, &session(), "line one\nline two\r\nline three")
+        .await
+        .unwrap();
 
     let calls = runner.calls.lock().unwrap();
     assert_eq!(calls[0].1[4], "line one line two  line three");
@@ -302,7 +399,10 @@ async fn tmux_collapses_newlines_to_spaces() {
 async fn tmux_skips_enter_when_typing_fails() {
     let runner = FakeRunner::failing();
     let poster = FakePoster::default();
-    let t = WakeTarget { tmux_pane: Some("%2".to_string()), ..target("claude") };
+    let t = WakeTarget {
+        tmux_pane: Some("%2".to_string()),
+        ..target("claude")
+    };
 
     let woken = wake_with(&runner, &poster, &t, &session(), "hi").await.unwrap();
 

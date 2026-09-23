@@ -12,13 +12,20 @@ pub struct SseSplitter {
 
 impl SseSplitter {
     pub fn new() -> Self {
-        SseSplitter { buf: Vec::new(), event_type: None, data_lines: Vec::new(), any_field_seen: false }
+        SseSplitter {
+            buf: Vec::new(),
+            event_type: None,
+            data_lines: Vec::new(),
+            any_field_seen: false,
+        }
     }
 
     pub fn feed(&mut self, chunk: &[u8], mut on_event: impl FnMut(Option<&str>, &str)) {
         self.buf.extend_from_slice(chunk);
         loop {
-            let Some(pos) = self.buf.iter().position(|&b| b == b'\n') else { break };
+            let Some(pos) = self.buf.iter().position(|&b| b == b'\n') else {
+                break;
+            };
             let mut line_bytes: Vec<u8> = self.buf.drain(..=pos).collect();
             line_bytes.pop(); // trailing '\n'
             if line_bytes.last() == Some(&b'\r') {
@@ -94,7 +101,10 @@ mod tests {
     #[test]
     fn basic_event() {
         let events = collect(&[b"event: message_start\ndata: {\"a\":1}\n\n"]);
-        assert_eq!(events, vec![(Some("message_start".to_string()), "{\"a\":1}".to_string())]);
+        assert_eq!(
+            events,
+            vec![(Some("message_start".to_string()), "{\"a\":1}".to_string())]
+        );
     }
 
     #[test]

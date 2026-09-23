@@ -2,7 +2,9 @@ use std::collections::BTreeMap;
 
 use serde_json::Value;
 
-use super::common::{extract_error_message, parse_event_json, str_field, u64_field, EventSink, StreamOrBody, TextTracker};
+use super::common::{
+    extract_error_message, parse_event_json, str_field, u64_field, EventSink, StreamOrBody, TextTracker,
+};
 use super::{ResponseParser, Summary, ToolCall, Usage};
 
 #[derive(Default)]
@@ -28,13 +30,21 @@ impl ChatSink {
         if let Some(v) = u64_field(usage, "prompt_tokens") {
             self.prompt_tokens = Some(v);
         }
-        if let Some(v) = usage.get("prompt_tokens_details").and_then(|d| d.get("cached_tokens")).and_then(|v| v.as_u64()) {
+        if let Some(v) = usage
+            .get("prompt_tokens_details")
+            .and_then(|d| d.get("cached_tokens"))
+            .and_then(|v| v.as_u64())
+        {
             self.cache_read = Some(v);
         }
         if let Some(v) = u64_field(usage, "completion_tokens") {
             self.completion_tokens = Some(v);
         }
-        if let Some(v) = usage.get("completion_tokens_details").and_then(|d| d.get("reasoning_tokens")).and_then(|v| v.as_u64()) {
+        if let Some(v) = usage
+            .get("completion_tokens_details")
+            .and_then(|d| d.get("reasoning_tokens"))
+            .and_then(|v| v.as_u64())
+        {
             self.reasoning_exact = Some(v);
         }
     }
@@ -76,7 +86,9 @@ impl EventSink for ChatSink {
                 self.consume_usage(usage);
             }
         }
-        let Some(choice0) = value.get("choices").and_then(|v| v.as_array()).and_then(|c| c.first()) else { return };
+        let Some(choice0) = value.get("choices").and_then(|v| v.as_array()).and_then(|c| c.first()) else {
+            return;
+        };
         if let Some(fr) = choice0.get("finish_reason").and_then(|v| v.as_str()) {
             self.finish_reason = Some(fr.to_string());
         }
@@ -97,7 +109,9 @@ impl EventSink for ChatSink {
     }
 
     fn on_body(&mut self, body: &[u8]) {
-        let Ok(value) = serde_json::from_slice::<Value>(body) else { return };
+        let Ok(value) = serde_json::from_slice::<Value>(body) else {
+            return;
+        };
         if let Some(err) = value.get("error").filter(|e| !e.is_null()) {
             self.error = Some(extract_error_message(err));
             return;
@@ -111,7 +125,9 @@ impl EventSink for ChatSink {
         if let Some(usage) = value.get("usage") {
             self.consume_usage(usage);
         }
-        let Some(choice0) = value.get("choices").and_then(|v| v.as_array()).and_then(|c| c.first()) else { return };
+        let Some(choice0) = value.get("choices").and_then(|v| v.as_array()).and_then(|c| c.first()) else {
+            return;
+        };
         if let Some(fr) = choice0.get("finish_reason").and_then(|v| v.as_str()) {
             self.finish_reason = Some(fr.to_string());
         }
@@ -150,7 +166,10 @@ impl EventSink for ChatSink {
             .tool_call_builders
             .into_values()
             .filter(|(id, name)| id.is_some() || name.is_some())
-            .map(|(id, name)| ToolCall { id: id.unwrap_or_default(), name: name.unwrap_or_default() })
+            .map(|(id, name)| ToolCall {
+                id: id.unwrap_or_default(),
+                name: name.unwrap_or_default(),
+            })
             .collect();
         Summary {
             model: self.model,
@@ -178,7 +197,9 @@ pub struct ChatParser {
 
 impl ChatParser {
     pub fn new() -> Self {
-        ChatParser { inner: StreamOrBody::new(ChatSink::default()) }
+        ChatParser {
+            inner: StreamOrBody::new(ChatSink::default()),
+        }
     }
 }
 

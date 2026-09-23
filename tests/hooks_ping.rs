@@ -10,7 +10,10 @@ fn same_hook_and_message_yields_same_id() {
 #[test]
 fn id_is_stable_regardless_of_fix() {
     // The fix text is presentation only; identity is hook + message.
-    assert_eq!(Ping::new("lint", "boom", None).id, Ping::new("lint", "boom", Some("do this")).id);
+    assert_eq!(
+        Ping::new("lint", "boom", None).id,
+        Ping::new("lint", "boom", Some("do this")).id
+    );
 }
 
 #[test]

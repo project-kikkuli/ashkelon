@@ -15,7 +15,11 @@ pub enum PreDecision {
 
 fn warn_once(key: &str) -> bool {
     static WARNED: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
-    WARNED.get_or_init(|| Mutex::new(HashSet::new())).lock().unwrap().insert(key.to_string())
+    WARNED
+        .get_or_init(|| Mutex::new(HashSet::new()))
+        .lock()
+        .unwrap()
+        .insert(key.to_string())
 }
 
 fn compile_patterns(patterns: &[String], context: &str) -> Vec<Regex> {

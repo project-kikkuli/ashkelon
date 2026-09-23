@@ -216,7 +216,10 @@ pub async fn handle(
     });
 
     let stream_body = StreamBody::new(ReceiverStream::new(rx));
-    let mut response = Response::builder().status(status).body(BoxBody::new(stream_body)).unwrap();
+    let mut response = Response::builder()
+        .status(status)
+        .body(BoxBody::new(stream_body))
+        .unwrap();
     *response.headers_mut() = client_headers;
     Ok(response)
 }
@@ -287,7 +290,11 @@ async fn forward_response(args: ForwardArgs) {
         // The chunk that tripped a rule is withheld, so the agent never sees the offending output.
         if let Some(rule) = &cut_rule {
             // A plaintext tail can't follow compressed bytes; a compressed stream just ends.
-            let tail = if args.response_encoding.is_identity() { rules::cut_tail(args.wire, rule) } else { Vec::new() };
+            let tail = if args.response_encoding.is_identity() {
+                rules::cut_tail(args.wire, rule)
+            } else {
+                Vec::new()
+            };
             if !tail.is_empty() {
                 let _ = args.tx.send(Ok(Frame::data(Bytes::from(tail)))).await;
             }
@@ -412,7 +419,9 @@ fn not_found() -> Response<ResponseBody> {
 fn bad_gateway(message: &str) -> Response<ResponseBody> {
     json_response(
         StatusCode::BAD_GATEWAY,
-        serde_json::json!({"error": {"type": "ashkelon_relay", "message": message}}).to_string().into_bytes(),
+        serde_json::json!({"error": {"type": "ashkelon_relay", "message": message}})
+            .to_string()
+            .into_bytes(),
     )
 }
 

@@ -19,7 +19,12 @@ pub fn plan(relay_base: &str, _launch: &str, args: &[String], _options: &LaunchO
         )
     };
 
-    plan.args = vec!["-c".to_string(), provider_toml, "-c".to_string(), r#"model_provider="ashkelon""#.to_string()];
+    plan.args = vec![
+        "-c".to_string(),
+        provider_toml,
+        "-c".to_string(),
+        r#"model_provider="ashkelon""#.to_string(),
+    ];
     plan.args.extend(passthrough);
     Ok(plan)
 }

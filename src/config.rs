@@ -113,7 +113,12 @@ pub struct PingConfig {
 
 impl Default for PingConfig {
     fn default() -> Self {
-        Self { max_per_session: 20, wake_idle: true, idle_after_secs: 20, max_concurrent_hooks: 4 }
+        Self {
+            max_per_session: 20,
+            wake_idle: true,
+            idle_after_secs: 20,
+            max_concurrent_hooks: 4,
+        }
     }
 }
 
@@ -132,7 +137,10 @@ pub struct ModelConfig {
 
 impl Config {
     pub fn default_path() -> PathBuf {
-        dirs::config_dir().unwrap_or_else(|| PathBuf::from(".")).join("ashkelon").join("config.toml")
+        dirs::config_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join("ashkelon")
+            .join("config.toml")
     }
 
     pub fn load(path: Option<&std::path::Path>) -> anyhow::Result<Config> {
@@ -154,5 +162,8 @@ impl Config {
 }
 
 fn state_home() -> PathBuf {
-    dirs::state_dir().or_else(dirs::data_local_dir).unwrap_or_else(|| PathBuf::from(".")).join("ashkelon")
+    dirs::state_dir()
+        .or_else(dirs::data_local_dir)
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("ashkelon")
 }

@@ -20,8 +20,8 @@ async fn passes_through_4xx_status_and_body_unchanged() {
     .await;
     let (relay_addr, log_dir) = spawn_relay(upstream, false).await;
 
-    let client = hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
-        .build_http::<Full<Bytes>>();
+    let client =
+        hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new()).build_http::<Full<Bytes>>();
     let req = Request::builder()
         .method("POST")
         .uri(format!("http://{relay_addr}/test/v1/messages"))

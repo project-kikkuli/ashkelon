@@ -107,7 +107,13 @@ fn tmux_pane_from_env() -> Option<String> {
 }
 
 /// `relay_base` is `http://127.0.0.1:<port>/s/<launch>`; routes hang off it (`/anthropic`, `/openai`, ...).
-pub fn plan(harness: &str, relay_base: &str, launch: &str, args: &[String], options: &LaunchOptions) -> anyhow::Result<LaunchPlan> {
+pub fn plan(
+    harness: &str,
+    relay_base: &str,
+    launch: &str,
+    args: &[String],
+    options: &LaunchOptions,
+) -> anyhow::Result<LaunchPlan> {
     match harness {
         "claude" => claude::plan(relay_base, launch, args, options),
         "codex" => codex::plan(relay_base, launch, args, options),
@@ -186,7 +192,10 @@ fn move_merge(src: &Path, dest: &Path) -> anyhow::Result<()> {
         std::fs::remove_dir_all(src).ok();
         return Ok(());
     }
-    let conflict_name = format!("{}.ashkelon-overlay-conflict", dest.file_name().and_then(|n| n.to_str()).unwrap_or("entry"));
+    let conflict_name = format!(
+        "{}.ashkelon-overlay-conflict",
+        dest.file_name().and_then(|n| n.to_str()).unwrap_or("entry")
+    );
     std::fs::rename(src, dest.with_file_name(conflict_name))?;
     Ok(())
 }

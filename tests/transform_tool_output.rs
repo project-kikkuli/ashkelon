@@ -4,7 +4,14 @@ use ashkelon::wire::Wire;
 use serde_json::{json, Value};
 
 fn trim_cfg(max_chars: usize, keep_head: usize, keep_tail: usize) -> TransformConfig {
-    TransformConfig { tool_output: Some(ToolOutputTrim { max_chars, keep_head, keep_tail }), strip: Vec::new() }
+    TransformConfig {
+        tool_output: Some(ToolOutputTrim {
+            max_chars,
+            keep_head,
+            keep_tail,
+        }),
+        strip: Vec::new(),
+    }
 }
 
 fn parse(bytes: &[u8]) -> Value {
@@ -22,7 +29,11 @@ fn anthropic_tool_result_string_content_is_trimmed() {
         ],
     });
     let cfg = trim_cfg(20, 5, 5);
-    let applied = apply(Wire::AnthropicMessages, &cfg, serde_json::to_vec(&body).unwrap().as_slice());
+    let applied = apply(
+        Wire::AnthropicMessages,
+        &cfg,
+        serde_json::to_vec(&body).unwrap().as_slice(),
+    );
     assert_eq!(applied.changed, vec!["tool_output".to_string()]);
 
     let out = parse(&applied.body);
@@ -50,7 +61,11 @@ fn anthropic_tool_result_block_array_content_is_trimmed_per_block() {
         }],
     });
     let cfg = trim_cfg(10, 2, 2);
-    let applied = apply(Wire::AnthropicMessages, &cfg, serde_json::to_vec(&body).unwrap().as_slice());
+    let applied = apply(
+        Wire::AnthropicMessages,
+        &cfg,
+        serde_json::to_vec(&body).unwrap().as_slice(),
+    );
     assert_eq!(applied.changed, vec!["tool_output".to_string()]);
 
     let out = parse(&applied.body);
@@ -70,7 +85,11 @@ fn responses_function_call_output_is_trimmed() {
         ],
     });
     let cfg = trim_cfg(20, 5, 5);
-    let applied = apply(Wire::OpenAiResponses, &cfg, serde_json::to_vec(&body).unwrap().as_slice());
+    let applied = apply(
+        Wire::OpenAiResponses,
+        &cfg,
+        serde_json::to_vec(&body).unwrap().as_slice(),
+    );
     assert_eq!(applied.changed, vec!["tool_output".to_string()]);
 
     let out = parse(&applied.body);
@@ -88,7 +107,11 @@ fn responses_custom_tool_call_output_is_trimmed() {
         "input": [{"type": "custom_tool_call_output", "call_id": "c1", "output": long}],
     });
     let cfg = trim_cfg(10, 2, 2);
-    let applied = apply(Wire::OpenAiResponses, &cfg, serde_json::to_vec(&body).unwrap().as_slice());
+    let applied = apply(
+        Wire::OpenAiResponses,
+        &cfg,
+        serde_json::to_vec(&body).unwrap().as_slice(),
+    );
     assert_eq!(applied.changed, vec!["tool_output".to_string()]);
     let out = parse(&applied.body);
     assert!(out["input"][0]["output"].as_str().unwrap().contains("trimmed 26 chars"));
@@ -108,7 +131,10 @@ fn chat_tool_message_string_content_is_trimmed() {
     let applied = apply(Wire::OpenAiChat, &cfg, serde_json::to_vec(&body).unwrap().as_slice());
     assert_eq!(applied.changed, vec!["tool_output".to_string()]);
     let out = parse(&applied.body);
-    assert!(out["messages"][1]["content"].as_str().unwrap().contains("trimmed 34 chars"));
+    assert!(out["messages"][1]["content"]
+        .as_str()
+        .unwrap()
+        .contains("trimmed 34 chars"));
     // The user message is untouched by tool_output trimming.
     assert_eq!(out["messages"][0]["content"], "run the thing");
 }
@@ -128,7 +154,10 @@ fn chat_tool_message_content_parts_are_trimmed_per_part() {
     let applied = apply(Wire::OpenAiChat, &cfg, serde_json::to_vec(&body).unwrap().as_slice());
     assert_eq!(applied.changed, vec!["tool_output".to_string()]);
     let out = parse(&applied.body);
-    assert!(out["messages"][0]["content"][0]["text"].as_str().unwrap().contains("trimmed 34 chars"));
+    assert!(out["messages"][0]["content"][0]["text"]
+        .as_str()
+        .unwrap()
+        .contains("trimmed 34 chars"));
 }
 
 #[test]
@@ -214,7 +243,11 @@ fn responses_reasoning_item_encrypted_content_is_untouched_by_trim() {
         ],
     });
     let cfg = trim_cfg(20, 5, 5);
-    let applied = apply(Wire::OpenAiResponses, &cfg, serde_json::to_vec(&body).unwrap().as_slice());
+    let applied = apply(
+        Wire::OpenAiResponses,
+        &cfg,
+        serde_json::to_vec(&body).unwrap().as_slice(),
+    );
     assert_eq!(applied.changed, vec!["tool_output".to_string()]);
     let out = parse(&applied.body);
     assert_eq!(out["input"][0]["encrypted_content"], "opaque-cipher-text");

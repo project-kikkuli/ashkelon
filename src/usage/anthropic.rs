@@ -1,6 +1,8 @@
 use serde_json::Value;
 
-use super::common::{extract_error_message, parse_event_json, str_field, u64_field, EventSink, StreamOrBody, TextTracker};
+use super::common::{
+    extract_error_message, parse_event_json, str_field, u64_field, EventSink, StreamOrBody, TextTracker,
+};
 use super::{ResponseParser, Summary, ToolCall, Usage};
 
 #[derive(Default)]
@@ -152,16 +154,28 @@ impl EventSink for AnthropicSink {
                 }
             }
             "error" => {
-                self.error = Some(value.get("error").map(extract_error_message).unwrap_or_else(|| "provider error".to_string()));
+                self.error = Some(
+                    value
+                        .get("error")
+                        .map(extract_error_message)
+                        .unwrap_or_else(|| "provider error".to_string()),
+                );
             }
             _ => {}
         }
     }
 
     fn on_body(&mut self, body: &[u8]) {
-        let Ok(value) = serde_json::from_slice::<Value>(body) else { return };
+        let Ok(value) = serde_json::from_slice::<Value>(body) else {
+            return;
+        };
         if value.get("type").and_then(|v| v.as_str()) == Some("error") {
-            self.error = Some(value.get("error").map(extract_error_message).unwrap_or_else(|| "provider error".to_string()));
+            self.error = Some(
+                value
+                    .get("error")
+                    .map(extract_error_message)
+                    .unwrap_or_else(|| "provider error".to_string()),
+            );
             return;
         }
         if let Some(id) = str_field(&value, "id") {
@@ -224,7 +238,9 @@ pub struct AnthropicParser {
 
 impl AnthropicParser {
     pub fn new() -> Self {
-        AnthropicParser { inner: StreamOrBody::new(AnthropicSink::default()) }
+        AnthropicParser {
+            inner: StreamOrBody::new(AnthropicSink::default()),
+        }
     }
 }
 

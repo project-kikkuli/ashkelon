@@ -32,9 +32,7 @@ use types::event_name;
 /// Delivers a ping to an idle agent. Boxed so tests can substitute a fake without ever spawning
 /// a harness or touching real credentials; production uses [`wake::wake`].
 pub type WakeFn = Arc<
-    dyn Fn(WakeTarget, SessionKey, String) -> Pin<Box<dyn Future<Output = anyhow::Result<bool>> + Send>>
-        + Send
-        + Sync,
+    dyn Fn(WakeTarget, SessionKey, String) -> Pin<Box<dyn Future<Output = anyhow::Result<bool>> + Send>> + Send + Sync,
 >;
 
 fn default_waker() -> WakeFn {
@@ -107,7 +105,10 @@ impl Engine {
     }
 
     fn arc(&self) -> Arc<Engine> {
-        self.self_weak.get().and_then(Weak::upgrade).expect("Engine used after its Arc was dropped")
+        self.self_weak
+            .get()
+            .and_then(Weak::upgrade)
+            .expect("Engine used after its Arc was dropped")
     }
 
     /// Launches the idle-wake sweep. The constructor stays sync; call this once the engine is
@@ -125,7 +126,10 @@ impl Engine {
 
     /// Records how to reach a launched agent and where it runs.
     pub fn register_launch(&self, launch: &str, target: WakeTarget, cwd: PathBuf) {
-        self.launches.lock().unwrap().insert(launch.to_string(), LaunchInfo { target, cwd });
+        self.launches
+            .lock()
+            .unwrap()
+            .insert(launch.to_string(), LaunchInfo { target, cwd });
     }
 
     fn session_dir(&self, key: &SessionKey) -> PathBuf {
@@ -172,10 +176,13 @@ impl Engine {
         let mut sessions = self.sessions.lock().unwrap();
         let is_new = !sessions.contains_key(key);
         if is_new {
-            let launch_info = key
-                .launch
-                .as_deref()
-                .and_then(|id| self.launches.lock().unwrap().get(id).map(|i| (i.cwd.clone(), i.target.clone())));
+            let launch_info = key.launch.as_deref().and_then(|id| {
+                self.launches
+                    .lock()
+                    .unwrap()
+                    .get(id)
+                    .map(|i| (i.cwd.clone(), i.target.clone()))
+            });
             let (cwd, wake_target) = match launch_info {
                 Some((cwd, target)) => (Some(cwd), Some(target)),
                 None => (None, None),
@@ -316,7 +323,8 @@ impl Engine {
             Outcome::Timeout => "timeout",
             Outcome::Error(_) => "error",
         };
-        self.append_hook_log(&hook.name, event, &key.session, status, result.duration_ms).await;
+        self.append_hook_log(&hook.name, event, &key.session, status, result.duration_ms)
+            .await;
 
         match result.outcome {
             Outcome::Pass => {
@@ -365,7 +373,12 @@ impl Engine {
         .to_string();
         line.push('\n');
 
-        match tokio::fs::OpenOptions::new().create(true).append(true).open(&path).await {
+        match tokio::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+            .await
+        {
             Ok(mut f) => {
                 if let Err(e) = f.write_all(line.as_bytes()).await {
                     tracing::warn!(error = %e, "failed to write hook log line");
@@ -436,7 +449,12 @@ impl Engine {
                         return None;
                     }
                     let target = state.wake_target.clone()?;
-                    let text = state.outbox.iter().map(|p| p.text.clone()).collect::<Vec<_>>().join("\n\n");
+                    let text = state
+                        .outbox
+                        .iter()
+                        .map(|p| p.text.clone())
+                        .collect::<Vec<_>>()
+                        .join("\n\n");
                     Some((key.clone(), target, text))
                 })
                 .collect()
@@ -490,4 +508,3 @@ async fn set_mode(path: &Path, mode: u32) {
     use std::os::unix::fs::PermissionsExt;
     let _ = tokio::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).await;
 }
-

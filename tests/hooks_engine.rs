@@ -11,7 +11,11 @@ use ashkelon::wake::WakeTarget;
 use ashkelon::wire::Wire;
 
 fn key(session: &str) -> SessionKey {
-    SessionKey { launch: None, harness: Some("test".into()), session: session.into() }
+    SessionKey {
+        launch: None,
+        harness: Some("test".into()),
+        session: session.into(),
+    }
 }
 
 fn hook(name: &str, on: Vec<HookEvent>, command: &Path) -> HookConfig {
@@ -37,7 +41,11 @@ fn write_script(dir: &Path, name: &str, body: &str) -> std::path::PathBuf {
 }
 
 fn sandboxed_config(dir: &Path) -> Config {
-    Config { state_dir: Some(dir.join("state")), log_dir: Some(dir.join("logs")), ..Config::default() }
+    Config {
+        state_dir: Some(dir.join("state")),
+        log_dir: Some(dir.join("logs")),
+        ..Config::default()
+    }
 }
 
 fn noop_waker() -> WakeFn {
@@ -140,7 +148,11 @@ async fn session_start_fires_exactly_once() {
 
     engine.observe_request(&k, Wire::Opaque, b"{}");
     tokio::time::sleep(Duration::from_millis(400)).await;
-    assert_eq!(count_lines(&log_text(&cfg), "onstart", "fail"), 1, "session_start must not refire");
+    assert_eq!(
+        count_lines(&log_text(&cfg), "onstart", "fail"),
+        1,
+        "session_start must not refire"
+    );
 }
 
 #[tokio::test]
@@ -159,7 +171,11 @@ async fn identical_repeated_prompt_does_not_refire() {
 
     engine.observe_request(&k, Wire::AnthropicMessages, body);
     tokio::time::sleep(Duration::from_millis(400)).await;
-    assert_eq!(count_lines(&log_text(&cfg), "onprompt", "fail"), 1, "an unchanged prompt must not refire");
+    assert_eq!(
+        count_lines(&log_text(&cfg), "onprompt", "fail"),
+        1,
+        "an unchanged prompt must not refire"
+    );
 }
 
 #[tokio::test]
@@ -173,7 +189,14 @@ async fn compaction_fires_and_clears_previously_delivered_pins() {
         hook("oncompaction", vec![HookEvent::Compaction], &oncompaction),
     ];
     let cfg = Arc::new(c);
-    let engine = Engine::new_with_injector(cfg.clone(), noop_waker(), Box::new(ThresholdInjector { len: 3, max_ok_pins: 99 }));
+    let engine = Engine::new_with_injector(
+        cfg.clone(),
+        noop_waker(),
+        Box::new(ThresholdInjector {
+            len: 3,
+            max_ok_pins: 99,
+        }),
+    );
     let k = key("s1");
 
     let long_body = br#"{"messages":[{"role":"user","content":"a"},{"role":"assistant","content":"b"},{"role":"user","content":"first"}]}"#;
@@ -189,14 +212,21 @@ async fn compaction_fires_and_clears_previously_delivered_pins() {
     let short_body = br#"{"messages":[{"role":"user","content":"first"}]}"#;
     engine.observe_request(&k, Wire::AnthropicMessages, short_body);
     wait_for(|| count_lines(&log_text(&cfg), "oncompaction", "fail") >= 1).await;
-    assert_eq!(count_lines(&log_text(&cfg), "onprompt", "fail"), 1, "same prompt text must not have refired");
+    assert_eq!(
+        count_lines(&log_text(&cfg), "onprompt", "fail"),
+        1,
+        "same prompt text must not have refired"
+    );
 
     // The only pin `attach_pings` should have left to combine with the new one is the
     // compaction hook's own pending ping: if the old delivered pin had NOT been cleared, this
     // would carry 2 pins instead of 1.
     let (body, ids) = engine.attach_pings(&k, Wire::AnthropicMessages, short_body).unwrap();
     assert_eq!(ids.len(), 1);
-    assert!(body.ends_with(b":1"), "stale delivered pin should have been dropped by compaction");
+    assert!(
+        body.ends_with(b":1"),
+        "stale delivered pin should have been dropped by compaction"
+    );
 }
 
 // --- hook execution: timeouts, bad output, pass/fail, coalescing -----------------------------
@@ -205,7 +235,11 @@ async fn compaction_fires_and_clears_previously_delivered_pins() {
 async fn timeout_kills_the_hook_and_never_becomes_a_ping() {
     let dir = tempfile::tempdir().unwrap();
     let mut c = sandboxed_config(dir.path());
-    let script = write_script(dir.path(), "hang.sh", "#!/bin/sh\ncat >/dev/null\nsleep 5\necho '{\"status\":\"pass\"}'\n");
+    let script = write_script(
+        dir.path(),
+        "hang.sh",
+        "#!/bin/sh\ncat >/dev/null\nsleep 5\necho '{\"status\":\"pass\"}'\n",
+    );
     let mut h = hook("hang", vec![HookEvent::Prompt], &script);
     h.timeout_secs = 1;
     c.hooks = vec![h];
@@ -213,26 +247,44 @@ async fn timeout_kills_the_hook_and_never_becomes_a_ping() {
     let engine = Engine::new(cfg.clone());
     let k = key("s1");
 
-    engine.observe_request(&k, Wire::AnthropicMessages, br#"{"messages":[{"role":"user","content":"hi"}]}"#);
+    engine.observe_request(
+        &k,
+        Wire::AnthropicMessages,
+        br#"{"messages":[{"role":"user","content":"hi"}]}"#,
+    );
     wait_for(|| count_lines(&log_text(&cfg), "hang", "timeout") >= 1).await;
 
-    assert!(engine.attach_pings(&k, Wire::AnthropicMessages, b"{}").is_none(), "a timeout must never become a ping");
+    assert!(
+        engine.attach_pings(&k, Wire::AnthropicMessages, b"{}").is_none(),
+        "a timeout must never become a ping"
+    );
 }
 
 #[tokio::test]
 async fn non_json_stdout_is_logged_as_error_without_a_ping() {
     let dir = tempfile::tempdir().unwrap();
     let mut c = sandboxed_config(dir.path());
-    let script = write_script(dir.path(), "garbage.sh", "#!/bin/sh\ncat >/dev/null\necho 'not json at all'\n");
+    let script = write_script(
+        dir.path(),
+        "garbage.sh",
+        "#!/bin/sh\ncat >/dev/null\necho 'not json at all'\n",
+    );
     c.hooks = vec![hook("garbage", vec![HookEvent::Prompt], &script)];
     let cfg = Arc::new(c);
     let engine = Engine::new(cfg.clone());
     let k = key("s1");
 
-    engine.observe_request(&k, Wire::AnthropicMessages, br#"{"messages":[{"role":"user","content":"hi"}]}"#);
+    engine.observe_request(
+        &k,
+        Wire::AnthropicMessages,
+        br#"{"messages":[{"role":"user","content":"hi"}]}"#,
+    );
     wait_for(|| count_lines(&log_text(&cfg), "garbage", "error") >= 1).await;
 
-    assert!(engine.attach_pings(&k, Wire::AnthropicMessages, b"{}").is_none(), "malformed output must never become a ping");
+    assert!(
+        engine.attach_pings(&k, Wire::AnthropicMessages, b"{}").is_none(),
+        "malformed output must never become a ping"
+    );
 }
 
 #[tokio::test]
@@ -253,11 +305,19 @@ async fn a_later_pass_resolves_a_still_pending_failure() {
     let engine = Engine::new(cfg.clone());
     let k = key("s1");
 
-    engine.observe_request(&k, Wire::AnthropicMessages, br#"{"messages":[{"role":"user","content":"attempt one"}]}"#);
+    engine.observe_request(
+        &k,
+        Wire::AnthropicMessages,
+        br#"{"messages":[{"role":"user","content":"attempt one"}]}"#,
+    );
     wait_for(|| count_lines(&log_text(&cfg), "flip", "fail") >= 1).await;
 
     std::fs::write(&flag, b"").unwrap();
-    engine.observe_request(&k, Wire::AnthropicMessages, br#"{"messages":[{"role":"user","content":"attempt two"}]}"#);
+    engine.observe_request(
+        &k,
+        Wire::AnthropicMessages,
+        br#"{"messages":[{"role":"user","content":"attempt two"}]}"#,
+    );
     wait_for(|| count_lines(&log_text(&cfg), "flip", "pass") >= 1).await;
 
     assert!(
@@ -273,12 +333,27 @@ async fn identical_failure_is_deduplicated_not_queued_twice() {
     let script = write_script(dir.path(), "lint.sh", &always_fail_with("same message"));
     c.hooks = vec![hook("lint", vec![HookEvent::Prompt], &script)];
     let cfg = Arc::new(c);
-    let engine = Engine::new_with_injector(cfg.clone(), noop_waker(), Box::new(ThresholdInjector { len: 1, max_ok_pins: 99 }));
+    let engine = Engine::new_with_injector(
+        cfg.clone(),
+        noop_waker(),
+        Box::new(ThresholdInjector {
+            len: 1,
+            max_ok_pins: 99,
+        }),
+    );
     let k = key("s1");
 
-    engine.observe_request(&k, Wire::AnthropicMessages, br#"{"messages":[{"role":"user","content":"one"}]}"#);
+    engine.observe_request(
+        &k,
+        Wire::AnthropicMessages,
+        br#"{"messages":[{"role":"user","content":"one"}]}"#,
+    );
     wait_for(|| count_lines(&log_text(&cfg), "lint", "fail") >= 1).await;
-    engine.observe_request(&k, Wire::AnthropicMessages, br#"{"messages":[{"role":"user","content":"two"}]}"#);
+    engine.observe_request(
+        &k,
+        Wire::AnthropicMessages,
+        br#"{"messages":[{"role":"user","content":"two"}]}"#,
+    );
     wait_for(|| count_lines(&log_text(&cfg), "lint", "fail") >= 2).await;
 
     let (_, ids) = engine.attach_pings(&k, Wire::AnthropicMessages, b"{}").unwrap();
@@ -296,12 +371,26 @@ async fn max_per_session_caps_total_deliveries() {
     c.pings.max_per_session = 1;
     let script_a = write_script(dir.path(), "a.sh", &always_fail_with("one"));
     let script_b = write_script(dir.path(), "b.sh", &always_fail_with("two"));
-    c.hooks = vec![hook("a", vec![HookEvent::Prompt], &script_a), hook("b", vec![HookEvent::Prompt], &script_b)];
+    c.hooks = vec![
+        hook("a", vec![HookEvent::Prompt], &script_a),
+        hook("b", vec![HookEvent::Prompt], &script_b),
+    ];
     let cfg = Arc::new(c);
-    let engine = Engine::new_with_injector(cfg.clone(), noop_waker(), Box::new(ThresholdInjector { len: 1, max_ok_pins: 99 }));
+    let engine = Engine::new_with_injector(
+        cfg.clone(),
+        noop_waker(),
+        Box::new(ThresholdInjector {
+            len: 1,
+            max_ok_pins: 99,
+        }),
+    );
     let k = key("s1");
 
-    engine.observe_request(&k, Wire::AnthropicMessages, br#"{"messages":[{"role":"user","content":"one shot"}]}"#);
+    engine.observe_request(
+        &k,
+        Wire::AnthropicMessages,
+        br#"{"messages":[{"role":"user","content":"one shot"}]}"#,
+    );
     wait_for(|| count_lines(&log_text(&cfg), "a", "fail") >= 1 && count_lines(&log_text(&cfg), "b", "fail") >= 1).await;
 
     let (_, ids) = engine.attach_pings(&k, Wire::AnthropicMessages, b"{}").unwrap();
@@ -314,13 +403,21 @@ async fn max_per_session_caps_total_deliveries() {
 async fn overlapping_events_coalesce_into_a_single_rerun() {
     let dir = tempfile::tempdir().unwrap();
     let mut c = sandboxed_config(dir.path());
-    let script = write_script(dir.path(), "slow.sh", "#!/bin/sh\ncat >/dev/null\nsleep 0.3\necho '{\"status\":\"pass\"}'\n");
+    let script = write_script(
+        dir.path(),
+        "slow.sh",
+        "#!/bin/sh\ncat >/dev/null\nsleep 0.3\necho '{\"status\":\"pass\"}'\n",
+    );
     c.hooks = vec![hook("slow", vec![HookEvent::Prompt], &script)];
     let cfg = Arc::new(c);
     let engine = Engine::new(cfg.clone());
     let k = key("s1");
 
-    engine.observe_request(&k, Wire::AnthropicMessages, br#"{"messages":[{"role":"user","content":"one"}]}"#);
+    engine.observe_request(
+        &k,
+        Wire::AnthropicMessages,
+        br#"{"messages":[{"role":"user","content":"one"}]}"#,
+    );
     tokio::time::sleep(Duration::from_millis(50)).await;
     engine.observe_request(
         &k,
@@ -363,7 +460,11 @@ async fn hook_receives_the_documented_stdin_and_env() {
     let engine = Engine::new(cfg.clone());
     let k = key("s1");
 
-    engine.observe_request(&k, Wire::AnthropicMessages, br#"{"messages":[{"role":"user","content":"hello world"}]}"#);
+    engine.observe_request(
+        &k,
+        Wire::AnthropicMessages,
+        br#"{"messages":[{"role":"user","content":"hello world"}]}"#,
+    );
     wait_for(|| captured.exists() && env_captured.exists()).await;
     wait_for(|| count_lines(&log_text(&cfg), "capture", "pass") >= 1).await;
 
@@ -382,7 +483,10 @@ async fn hook_receives_the_documented_stdin_and_env() {
     let mut lines = env_text.lines();
     assert_eq!(lines.next(), Some("prompt"));
     assert!(lines.next().unwrap().contains("sessions"));
-    assert!(!lines.next().unwrap().is_empty(), "ASHKELON_BIN should be set to the current executable");
+    assert!(
+        !lines.next().unwrap().is_empty(),
+        "ASHKELON_BIN should be set to the current executable"
+    );
 }
 
 // --- persisted per-session context -----------------------------------------------------------
@@ -399,9 +503,19 @@ async fn request_and_response_bodies_are_persisted_per_session() {
     engine.observe_request(&k, Wire::AnthropicMessages, body);
 
     let sessions_dir = cfg.state_dir().join("sessions");
-    wait_for(|| sessions_dir.is_dir() && std::fs::read_dir(&sessions_dir).map(|mut d| d.next().is_some()).unwrap_or(false))
-        .await;
-    let session_dir = std::fs::read_dir(&sessions_dir).unwrap().next().unwrap().unwrap().path();
+    wait_for(|| {
+        sessions_dir.is_dir()
+            && std::fs::read_dir(&sessions_dir)
+                .map(|mut d| d.next().is_some())
+                .unwrap_or(false)
+    })
+    .await;
+    let session_dir = std::fs::read_dir(&sessions_dir)
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
 
     wait_for(|| session_dir.join("request.json").exists()).await;
     let saved = std::fs::read(session_dir.join("request.json")).unwrap();
@@ -412,7 +526,11 @@ async fn request_and_response_bodies_are_persisted_per_session() {
         use std::os::unix::fs::PermissionsExt;
         let dir_mode = std::fs::metadata(&session_dir).unwrap().permissions().mode() & 0o777;
         assert_eq!(dir_mode, 0o700);
-        let file_mode = std::fs::metadata(session_dir.join("request.json")).unwrap().permissions().mode() & 0o777;
+        let file_mode = std::fs::metadata(session_dir.join("request.json"))
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777;
         assert_eq!(file_mode, 0o600);
     }
 }
@@ -423,7 +541,14 @@ async fn request_and_response_bodies_are_persisted_per_session() {
 async fn attach_pings_is_none_when_nothing_is_queued() {
     let dir = tempfile::tempdir().unwrap();
     let cfg = Arc::new(sandboxed_config(dir.path()));
-    let engine = Engine::new_with_injector(cfg, noop_waker(), Box::new(ThresholdInjector { len: 1, max_ok_pins: 99 }));
+    let engine = Engine::new_with_injector(
+        cfg,
+        noop_waker(),
+        Box::new(ThresholdInjector {
+            len: 1,
+            max_ok_pins: 99,
+        }),
+    );
     let k = key("s1");
     engine.observe_request(&k, Wire::Opaque, b"{}");
     assert!(engine.attach_pings(&k, Wire::AnthropicMessages, b"{}").is_none());
@@ -436,10 +561,21 @@ async fn attach_pings_delivers_a_pending_failure() {
     let script = write_script(dir.path(), "lint.sh", &always_fail_with("bad"));
     c.hooks = vec![hook("lint", vec![HookEvent::Prompt], &script)];
     let cfg = Arc::new(c);
-    let engine = Engine::new_with_injector(cfg.clone(), noop_waker(), Box::new(ThresholdInjector { len: 2, max_ok_pins: 99 }));
+    let engine = Engine::new_with_injector(
+        cfg.clone(),
+        noop_waker(),
+        Box::new(ThresholdInjector {
+            len: 2,
+            max_ok_pins: 99,
+        }),
+    );
     let k = key("s1");
 
-    engine.observe_request(&k, Wire::AnthropicMessages, br#"{"messages":[{"role":"user","content":"hi"}]}"#);
+    engine.observe_request(
+        &k,
+        Wire::AnthropicMessages,
+        br#"{"messages":[{"role":"user","content":"hi"}]}"#,
+    );
     wait_for(|| count_lines(&log_text(&cfg), "lint", "fail") >= 1).await;
 
     let (body, ids) = engine.attach_pings(&k, Wire::AnthropicMessages, b"{}").unwrap();
@@ -457,24 +593,42 @@ async fn attach_pings_reinserts_previously_delivered_pins_alongside_new_ones() {
     let mut c = sandboxed_config(dir.path());
     let first = write_script(dir.path(), "first.sh", &always_fail_with("first failure"));
     let second = write_script(dir.path(), "second.sh", &always_fail_with("second failure"));
-    c.hooks = vec![hook("first", vec![HookEvent::Prompt], &first), hook("second", vec![HookEvent::ToolResult], &second)];
+    c.hooks = vec![
+        hook("first", vec![HookEvent::Prompt], &first),
+        hook("second", vec![HookEvent::ToolResult], &second),
+    ];
     let cfg = Arc::new(c);
-    let engine = Engine::new_with_injector(cfg.clone(), noop_waker(), Box::new(ThresholdInjector { len: 2, max_ok_pins: 99 }));
+    let engine = Engine::new_with_injector(
+        cfg.clone(),
+        noop_waker(),
+        Box::new(ThresholdInjector {
+            len: 2,
+            max_ok_pins: 99,
+        }),
+    );
     let k = key("s1");
 
-    engine.observe_request(&k, Wire::AnthropicMessages, br#"{"messages":[{"role":"user","content":"hi"}]}"#);
+    engine.observe_request(
+        &k,
+        Wire::AnthropicMessages,
+        br#"{"messages":[{"role":"user","content":"hi"}]}"#,
+    );
     wait_for(|| count_lines(&log_text(&cfg), "first", "fail") >= 1).await;
     let (_, ids1) = engine.attach_pings(&k, Wire::AnthropicMessages, b"{}").unwrap();
     assert_eq!(ids1.len(), 1);
 
-    let tool_result_body = br#"{"messages":[{"role":"user","content":[{"type":"tool_result","tool_use_id":"1","content":"ok"}]}]}"#;
+    let tool_result_body =
+        br#"{"messages":[{"role":"user","content":[{"type":"tool_result","tool_use_id":"1","content":"ok"}]}]}"#;
     engine.observe_request(&k, Wire::AnthropicMessages, tool_result_body);
     wait_for(|| count_lines(&log_text(&cfg), "second", "fail") >= 1).await;
 
     let (body, ids2) = engine.attach_pings(&k, Wire::AnthropicMessages, b"{}").unwrap();
     assert_eq!(ids2.len(), 1, "only the newly delivered id is reported");
     assert_ne!(ids1[0], ids2[0]);
-    assert!(body.ends_with(b":2"), "both the old and new pin must have been passed to inject");
+    assert!(
+        body.ends_with(b":2"),
+        "both the old and new pin must have been passed to inject"
+    );
 }
 
 #[tokio::test]
@@ -483,25 +637,40 @@ async fn attach_pings_drops_stale_delivered_pins_and_retries_with_new_only() {
     let mut c = sandboxed_config(dir.path());
     let first = write_script(dir.path(), "first.sh", &always_fail_with("first failure"));
     let second = write_script(dir.path(), "second.sh", &always_fail_with("second failure"));
-    c.hooks = vec![hook("first", vec![HookEvent::Prompt], &first), hook("second", vec![HookEvent::ToolResult], &second)];
+    c.hooks = vec![
+        hook("first", vec![HookEvent::Prompt], &first),
+        hook("second", vec![HookEvent::ToolResult], &second),
+    ];
     let cfg = Arc::new(c);
     // Succeeds for a single pin (the ordinary deliver, and the retry-with-new-only), fails once
     // a second pin is combined in (the stale "all pins" attempt).
-    let engine = Engine::new_with_injector(cfg.clone(), noop_waker(), Box::new(ThresholdInjector { len: 2, max_ok_pins: 1 }));
+    let engine = Engine::new_with_injector(
+        cfg.clone(),
+        noop_waker(),
+        Box::new(ThresholdInjector { len: 2, max_ok_pins: 1 }),
+    );
     let k = key("s1");
 
-    engine.observe_request(&k, Wire::AnthropicMessages, br#"{"messages":[{"role":"user","content":"hi"}]}"#);
+    engine.observe_request(
+        &k,
+        Wire::AnthropicMessages,
+        br#"{"messages":[{"role":"user","content":"hi"}]}"#,
+    );
     wait_for(|| count_lines(&log_text(&cfg), "first", "fail") >= 1).await;
     let (_, ids1) = engine.attach_pings(&k, Wire::AnthropicMessages, b"{}").unwrap();
     assert_eq!(ids1.len(), 1);
 
-    let tool_result_body = br#"{"messages":[{"role":"user","content":[{"type":"tool_result","tool_use_id":"1","content":"ok"}]}]}"#;
+    let tool_result_body =
+        br#"{"messages":[{"role":"user","content":[{"type":"tool_result","tool_use_id":"1","content":"ok"}]}]}"#;
     engine.observe_request(&k, Wire::AnthropicMessages, tool_result_body);
     wait_for(|| count_lines(&log_text(&cfg), "second", "fail") >= 1).await;
 
     let (body, ids2) = engine.attach_pings(&k, Wire::AnthropicMessages, b"{}").unwrap();
     assert_eq!(ids2.len(), 1);
-    assert_ne!(ids1[0], ids2[0], "the stale pin was dropped, the new one is what got delivered");
+    assert_ne!(
+        ids1[0], ids2[0],
+        "the stale pin was dropped, the new one is what got delivered"
+    );
     assert!(body.ends_with(b":1"), "the retry carried only the new pin");
 }
 
@@ -517,14 +686,25 @@ async fn attach_pings_restores_the_outbox_on_total_failure() {
     let engine = Engine::new_with_injector(
         cfg.clone(),
         noop_waker(),
-        Box::new(FlakyInjector { len: 1, calls: AtomicUsize::new(0), fail_calls: 2 }),
+        Box::new(FlakyInjector {
+            len: 1,
+            calls: AtomicUsize::new(0),
+            fail_calls: 2,
+        }),
     );
     let k = key("s1");
 
-    engine.observe_request(&k, Wire::AnthropicMessages, br#"{"messages":[{"role":"user","content":"hi"}]}"#);
+    engine.observe_request(
+        &k,
+        Wire::AnthropicMessages,
+        br#"{"messages":[{"role":"user","content":"hi"}]}"#,
+    );
     wait_for(|| count_lines(&log_text(&cfg), "lint", "fail") >= 1).await;
 
-    assert!(engine.attach_pings(&k, Wire::AnthropicMessages, b"{}").is_none(), "both attempts were made to fail");
+    assert!(
+        engine.attach_pings(&k, Wire::AnthropicMessages, b"{}").is_none(),
+        "both attempts were made to fail"
+    );
     let (_, ids) = engine
         .attach_pings(&k, Wire::AnthropicMessages, b"{}")
         .expect("the pending ping must not have been lost by the earlier failure");
@@ -552,12 +732,26 @@ async fn idle_sweep_wakes_and_marks_delivered_without_pinning() {
             Ok(true)
         })
     });
-    let engine = Engine::new_with_injector(cfg.clone(), waker, Box::new(ThresholdInjector { len: 1, max_ok_pins: 99 }));
+    let engine = Engine::new_with_injector(
+        cfg.clone(),
+        waker,
+        Box::new(ThresholdInjector {
+            len: 1,
+            max_ok_pins: 99,
+        }),
+    );
     let k = key("s1");
     engine.register_launch("l1", WakeTarget::default(), dir.path().to_path_buf());
-    let k = SessionKey { launch: Some("l1".into()), ..k };
+    let k = SessionKey {
+        launch: Some("l1".into()),
+        ..k
+    };
 
-    engine.observe_request(&k, Wire::AnthropicMessages, br#"{"messages":[{"role":"user","content":"hi"}]}"#);
+    engine.observe_request(
+        &k,
+        Wire::AnthropicMessages,
+        br#"{"messages":[{"role":"user","content":"hi"}]}"#,
+    );
     wait_for(|| count_lines(&log_text(&cfg), "lint", "fail") >= 1).await;
 
     engine.idle_sweep().await;
@@ -588,18 +782,39 @@ async fn idle_sweep_skips_sessions_that_are_still_recent() {
             Ok(true)
         })
     });
-    let engine = Engine::new_with_injector(cfg.clone(), waker, Box::new(ThresholdInjector { len: 1, max_ok_pins: 99 }));
+    let engine = Engine::new_with_injector(
+        cfg.clone(),
+        waker,
+        Box::new(ThresholdInjector {
+            len: 1,
+            max_ok_pins: 99,
+        }),
+    );
     let k = key("s1");
     engine.register_launch("l1", WakeTarget::default(), dir.path().to_path_buf());
-    let k = SessionKey { launch: Some("l1".into()), ..k };
+    let k = SessionKey {
+        launch: Some("l1".into()),
+        ..k
+    };
 
-    engine.observe_request(&k, Wire::AnthropicMessages, br#"{"messages":[{"role":"user","content":"hi"}]}"#);
+    engine.observe_request(
+        &k,
+        Wire::AnthropicMessages,
+        br#"{"messages":[{"role":"user","content":"hi"}]}"#,
+    );
     wait_for(|| count_lines(&log_text(&cfg), "lint", "fail") >= 1).await;
 
     engine.idle_sweep().await;
-    assert!(woken.lock().unwrap().is_empty(), "the session is not idle long enough yet");
+    assert!(
+        woken.lock().unwrap().is_empty(),
+        "the session is not idle long enough yet"
+    );
     let (_, ids) = engine.attach_pings(&k, Wire::AnthropicMessages, b"{}").unwrap();
-    assert_eq!(ids.len(), 1, "the ping must still be pending, not consumed by the sweep");
+    assert_eq!(
+        ids.len(),
+        1,
+        "the ping must still be pending, not consumed by the sweep"
+    );
 }
 
 #[tokio::test]
@@ -612,15 +827,30 @@ async fn idle_sweep_ignores_sessions_without_a_registered_launch() {
     c.hooks = vec![hook("lint", vec![HookEvent::Prompt], &script)];
     let cfg = Arc::new(c);
 
-    let engine = Engine::new_with_injector(cfg.clone(), noop_waker(), Box::new(ThresholdInjector { len: 1, max_ok_pins: 99 }));
+    let engine = Engine::new_with_injector(
+        cfg.clone(),
+        noop_waker(),
+        Box::new(ThresholdInjector {
+            len: 1,
+            max_ok_pins: 99,
+        }),
+    );
     let k = key("s1"); // no register_launch call: no wake target
 
-    engine.observe_request(&k, Wire::AnthropicMessages, br#"{"messages":[{"role":"user","content":"hi"}]}"#);
+    engine.observe_request(
+        &k,
+        Wire::AnthropicMessages,
+        br#"{"messages":[{"role":"user","content":"hi"}]}"#,
+    );
     wait_for(|| count_lines(&log_text(&cfg), "lint", "fail") >= 1).await;
 
     engine.idle_sweep().await;
     let (_, ids) = engine.attach_pings(&k, Wire::AnthropicMessages, b"{}").unwrap();
-    assert_eq!(ids.len(), 1, "with no wake target the sweep must leave the pending ping alone");
+    assert_eq!(
+        ids.len(),
+        1,
+        "with no wake target the sweep must leave the pending ping alone"
+    );
 }
 
 #[tokio::test]
@@ -642,12 +872,26 @@ async fn idle_sweep_is_a_noop_when_wake_idle_is_disabled() {
             Ok(true)
         })
     });
-    let engine = Engine::new_with_injector(cfg.clone(), waker, Box::new(ThresholdInjector { len: 1, max_ok_pins: 99 }));
+    let engine = Engine::new_with_injector(
+        cfg.clone(),
+        waker,
+        Box::new(ThresholdInjector {
+            len: 1,
+            max_ok_pins: 99,
+        }),
+    );
     let k = key("s1");
     engine.register_launch("l1", WakeTarget::default(), dir.path().to_path_buf());
-    let k = SessionKey { launch: Some("l1".into()), ..k };
+    let k = SessionKey {
+        launch: Some("l1".into()),
+        ..k
+    };
 
-    engine.observe_request(&k, Wire::AnthropicMessages, br#"{"messages":[{"role":"user","content":"hi"}]}"#);
+    engine.observe_request(
+        &k,
+        Wire::AnthropicMessages,
+        br#"{"messages":[{"role":"user","content":"hi"}]}"#,
+    );
     wait_for(|| count_lines(&log_text(&cfg), "lint", "fail") >= 1).await;
 
     engine.idle_sweep().await;

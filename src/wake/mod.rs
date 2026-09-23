@@ -67,19 +67,29 @@ async fn try_verified_adapter(
             // Codex always reports a UUIDv7 session id on its own wire; the relay records it as
             // `key.session` regardless of whether anything has separately populated
             // `harness_session_id`, so that's a reliable fallback thread id for `codex queue`.
-            let thread = target.harness_session_id.clone().filter(|s| !s.is_empty()).or_else(|| Some(session.session.clone()));
-            let Some(thread) = thread.filter(|s| !s.is_empty()) else { return Ok(None) };
+            let thread = target
+                .harness_session_id
+                .clone()
+                .filter(|s| !s.is_empty())
+                .or_else(|| Some(session.session.clone()));
+            let Some(thread) = thread.filter(|s| !s.is_empty()) else {
+                return Ok(None);
+            };
             Ok(Some(codex::queue_message(commands, &thread, text).await?))
         }
         "opencode" => {
-            let Some(control) = &target.control else { return Ok(None) };
+            let Some(control) = &target.control else {
+                return Ok(None);
+            };
             let auth = target.control_auth.as_deref();
             let session_id = match &target.harness_session_id {
                 Some(id) if !id.is_empty() => Some(id.clone()),
                 _ => opencode::latest_session_id(http, control, auth).await?,
             };
             let Some(session_id) = session_id else { return Ok(None) };
-            Ok(Some(opencode::send_message(http, control, &session_id, text, auth).await?))
+            Ok(Some(
+                opencode::send_message(http, control, &session_id, text, auth).await?,
+            ))
         }
         // omp, hermes, ori, cursor: no verified local channel (see wake-research notes); tmux
         // is the only path.

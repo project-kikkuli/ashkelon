@@ -38,7 +38,11 @@ impl CommandRunner for SystemRunner {
     ) -> Pin<Box<dyn Future<Output = anyhow::Result<CommandOutput>> + Send + 'a>> {
         Box::pin(async move {
             let output = tokio::process::Command::new(program).args(args).output().await?;
-            Ok(CommandOutput { success: output.status.success(), stdout: output.stdout, stderr: output.stderr })
+            Ok(CommandOutput {
+                success: output.status.success(),
+                stdout: output.stdout,
+                stderr: output.stderr,
+            })
         })
     }
 }

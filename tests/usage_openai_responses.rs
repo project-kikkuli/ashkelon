@@ -22,8 +22,14 @@ fn streaming_completed_with_function_call_never_ends_the_turn() {
         "response.created",
         r#"{"type":"response.created","response":{"id":"resp_1","model":"gpt-x","status":"in_progress","output":[]}}"#,
     );
-    stream += &sse_event("response.output_text.delta", r#"{"type":"response.output_text.delta","delta":"Hi there"}"#);
-    stream += &sse_event("response.output_text.delta", r#"{"type":"response.output_text.delta","delta":", friend"}"#);
+    stream += &sse_event(
+        "response.output_text.delta",
+        r#"{"type":"response.output_text.delta","delta":"Hi there"}"#,
+    );
+    stream += &sse_event(
+        "response.output_text.delta",
+        r#"{"type":"response.output_text.delta","delta":", friend"}"#,
+    );
     stream += &sse_event(
         "response.completed",
         r#"{"type":"response.completed","response":{"id":"resp_1","model":"gpt-x","status":"completed","output":[{"type":"message","id":"msg_1","content":[{"type":"output_text","text":"Hi there, friend"}]},{"type":"function_call","id":"fc_1","call_id":"call_abc","name":"get_time","arguments":"{}"}],"usage":{"input_tokens":30,"input_tokens_details":{"cached_tokens":5},"output_tokens":12,"output_tokens_details":{"reasoning_tokens":4}}}}"#,
@@ -34,7 +40,10 @@ fn streaming_completed_with_function_call_never_ends_the_turn() {
     assert_eq!(summary.model.as_deref(), Some("gpt-x"));
     assert_eq!(summary.response_id.as_deref(), Some("resp_1"));
     assert_eq!(summary.stop_reason.as_deref(), Some("completed"));
-    assert!(!summary.turn_end, "a completed response with a pending tool call is not a turn end");
+    assert!(
+        !summary.turn_end,
+        "a completed response with a pending tool call is not a turn end"
+    );
     assert_eq!(summary.tool_calls.len(), 1);
     assert_eq!(summary.tool_calls[0].id, "call_abc");
     assert_eq!(summary.tool_calls[0].name, "get_time");
@@ -55,7 +64,10 @@ fn streaming_completed_with_function_call_never_ends_the_turn() {
 #[test]
 fn streaming_completed_with_no_tool_calls_ends_the_turn() {
     let mut stream = String::new();
-    stream += &sse_event("response.output_text.delta", r#"{"type":"response.output_text.delta","delta":"All done."}"#);
+    stream += &sse_event(
+        "response.output_text.delta",
+        r#"{"type":"response.output_text.delta","delta":"All done."}"#,
+    );
     stream += &sse_event(
         "response.completed",
         r#"{"type":"response.completed","response":{"id":"resp_2","model":"gpt-x","status":"completed","output":[{"type":"message","id":"msg_2","content":[{"type":"output_text","text":"All done."}]}],"usage":{"input_tokens":5,"output_tokens":3}}}"#,
@@ -131,7 +143,10 @@ fn chunk_split_at_every_byte_offset_agrees_with_whole_stream() {
         "response.created",
         r#"{"type":"response.created","response":{"id":"resp_9","model":"gpt-x","status":"in_progress"}}"#,
     );
-    stream += &sse_event("response.output_text.delta", r#"{"type":"response.output_text.delta","delta":"abc"}"#);
+    stream += &sse_event(
+        "response.output_text.delta",
+        r#"{"type":"response.output_text.delta","delta":"abc"}"#,
+    );
     stream += &sse_event(
         "response.completed",
         r#"{"type":"response.completed","response":{"id":"resp_9","model":"gpt-x","status":"completed","output":[],"usage":{"input_tokens":1,"output_tokens":1}}}"#,

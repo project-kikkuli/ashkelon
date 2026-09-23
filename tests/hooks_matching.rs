@@ -53,9 +53,24 @@ fn empty_projects_matches_sessions_with_no_cwd() {
 #[test]
 fn both_harness_and_project_constraints_must_hold() {
     let h = hook(vec![HookEvent::Prompt], vec!["claude"], vec!["/work/one"]);
-    assert!(matches(&h, HookEvent::Prompt, Some("claude"), Some(Path::new("/work/one"))));
-    assert!(!matches(&h, HookEvent::Prompt, Some("codex"), Some(Path::new("/work/one"))));
-    assert!(!matches(&h, HookEvent::Prompt, Some("claude"), Some(Path::new("/work/two"))));
+    assert!(matches(
+        &h,
+        HookEvent::Prompt,
+        Some("claude"),
+        Some(Path::new("/work/one"))
+    ));
+    assert!(!matches(
+        &h,
+        HookEvent::Prompt,
+        Some("codex"),
+        Some(Path::new("/work/one"))
+    ));
+    assert!(!matches(
+        &h,
+        HookEvent::Prompt,
+        Some("claude"),
+        Some(Path::new("/work/two"))
+    ));
 }
 
 #[test]

@@ -78,7 +78,11 @@ impl StreamDecoder {
             Encoding::Zstd => Inner::Zstd(Box::new(ZstdDecoder::new(VecSink(sink.clone())))),
             Encoding::Deflate => Inner::Deflate(Box::new(DeflateDecoder::new(VecSink(sink.clone())))),
         };
-        StreamDecoder { inner, sink, failed: false }
+        StreamDecoder {
+            inner,
+            sink,
+            failed: false,
+        }
     }
 
     /// Decodes what it can from `chunk`, returning newly available decoded bytes.

@@ -6,7 +6,13 @@ use crate::wake::runner::CommandRunner;
 /// has the id the running session itself reported (`WakeTarget::harness_session_id`), so this
 /// is a no-op until something else discovers and records that id.
 pub async fn queue_message(runner: &dyn CommandRunner, thread: &str, text: &str) -> anyhow::Result<bool> {
-    let args = vec!["queue".to_string(), "--thread".to_string(), thread.to_string(), "--message".to_string(), text.to_string()];
+    let args = vec![
+        "queue".to_string(),
+        "--thread".to_string(),
+        thread.to_string(),
+        "--message".to_string(),
+        text.to_string(),
+    ];
     let output = runner.run("codex", &args).await?;
     Ok(output.success)
 }

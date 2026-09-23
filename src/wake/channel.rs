@@ -30,7 +30,9 @@ pub async fn run(socket_path: &Path) -> anyhow::Result<()> {
 
     let accept_task = tokio::spawn(async move {
         loop {
-            let Ok((stream, _)) = listener.accept().await else { break };
+            let Ok((stream, _)) = listener.accept().await else {
+                break;
+            };
             let tx = tx.clone();
             tokio::spawn(relay_socket_lines(stream, tx));
         }
@@ -56,7 +58,9 @@ pub async fn run(socket_path: &Path) -> anyhow::Result<()> {
         if line.trim().is_empty() {
             continue;
         }
-        let Ok(message) = serde_json::from_str::<Value>(&line) else { continue };
+        let Ok(message) = serde_json::from_str::<Value>(&line) else {
+            continue;
+        };
         if let Some(response) = handle_request(&message) {
             let mut out = stdout.lock().await;
             write_line(&mut *out, &response).await?;
@@ -97,8 +101,11 @@ fn handle_request(message: &Value) -> Option<Value> {
             // would need updating every time Claude Code bumps its protocol revision); this
             // server only ever speaks the tiny fixed subset below, which is stable across
             // revisions.
-            let protocol_version =
-                message.get("params").and_then(|p| p.get("protocolVersion")).and_then(|v| v.as_str()).unwrap_or("2026-06-18");
+            let protocol_version = message
+                .get("params")
+                .and_then(|p| p.get("protocolVersion"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("2026-06-18");
             Some(json!({
                 "jsonrpc": "2.0",
                 "id": id,
@@ -116,9 +123,9 @@ fn handle_request(message: &Value) -> Option<Value> {
         "ping" => Some(json!({ "jsonrpc": "2.0", "id": id, "result": {} })),
         "tools/list" => Some(json!({ "jsonrpc": "2.0", "id": id, "result": { "tools": [] } })),
         "notifications/initialized" => None,
-        _ if id.is_some() => {
-            Some(json!({ "jsonrpc": "2.0", "id": id, "error": { "code": -32601, "message": format!("method not found: {method}") } }))
-        }
+        _ if id.is_some() => Some(
+            json!({ "jsonrpc": "2.0", "id": id, "error": { "code": -32601, "message": format!("method not found: {method}") } }),
+        ),
         _ => None,
     }
 }

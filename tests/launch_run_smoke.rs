@@ -28,7 +28,12 @@ fn run_sets_anthropic_base_url_and_propagates_exit_code() {
         .output()
         .expect("spawning ashkelon run");
 
-    assert_eq!(output.status.code(), Some(7), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(
+        output.status.code(),
+        Some(7),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 
     let captured = std::fs::read_to_string(&out_file).expect("fake claude should have written the base url");
     assert!(captured.starts_with("http://127.0.0.1:"), "captured: {captured}");

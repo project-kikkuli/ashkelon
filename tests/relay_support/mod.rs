@@ -48,7 +48,9 @@ where
                     let handler = handler.clone();
                     async move { Ok::<_, Infallible>(handler(req).await) }
                 });
-                let _ = hyper::server::conn::http1::Builder::new().serve_connection(io, svc).await;
+                let _ = hyper::server::conn::http1::Builder::new()
+                    .serve_connection(io, svc)
+                    .await;
             });
         }
     });
@@ -65,7 +67,10 @@ pub async fn spawn_relay(upstream: SocketAddr, log_bodies: bool) -> (SocketAddr,
         log_bodies,
         ..Config::default()
     };
-    cfg.routes.push(RouteConfig { name: "test".to_string(), upstream: format!("http://{upstream}") });
+    cfg.routes.push(RouteConfig {
+        name: "test".to_string(),
+        upstream: format!("http://{upstream}"),
+    });
 
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind relay");
     let addr = listener.local_addr().unwrap();
@@ -80,8 +85,12 @@ pub async fn spawn_relay(upstream: SocketAddr, log_bodies: bool) -> (SocketAddr,
 /// One line per call in `log_dir`'s daily file, oldest first.
 pub fn read_call_records(log_dir: &std::path::Path) -> Vec<serde_json::Value> {
     let date = time::OffsetDateTime::now_utc().date();
-    let filename =
-        format!("calls-{:04}-{:02}-{:02}.jsonl", date.year(), u8::from(date.month()), date.day());
+    let filename = format!(
+        "calls-{:04}-{:02}-{:02}.jsonl",
+        date.year(),
+        u8::from(date.month()),
+        date.day()
+    );
     let path = log_dir.join(filename);
     match std::fs::read_to_string(&path) {
         Ok(contents) => contents.lines().map(|l| serde_json::from_str(l).unwrap()).collect(),

@@ -45,9 +45,15 @@ async fn upstream_recording(seen: Seen) -> SocketAddr {
 
 async fn relay_with(upstream: SocketAddr, tweak: impl FnOnce(&mut Config)) -> (SocketAddr, tempfile::TempDir) {
     let log_dir = tempfile::tempdir().unwrap();
-    let mut cfg = Config { log_dir: Some(log_dir.path().to_path_buf()), ..Config::default() };
+    let mut cfg = Config {
+        log_dir: Some(log_dir.path().to_path_buf()),
+        ..Config::default()
+    };
     cfg.state_dir = Some(log_dir.path().join("state"));
-    cfg.routes.push(RouteConfig { name: "test".into(), upstream: format!("http://{upstream}") });
+    cfg.routes.push(RouteConfig {
+        name: "test".into(),
+        upstream: format!("http://{upstream}"),
+    });
     tweak(&mut cfg);
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -60,8 +66,8 @@ async fn relay_with(upstream: SocketAddr, tweak: impl FnOnce(&mut Config)) -> (S
 }
 
 async fn post(relay: SocketAddr, body: &str) -> (StatusCode, Bytes) {
-    let client = hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
-        .build_http::<Full<Bytes>>();
+    let client =
+        hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new()).build_http::<Full<Bytes>>();
     let req = Request::builder()
         .method("POST")
         .uri(format!("http://{relay}/test/v1/messages"))
@@ -98,8 +104,10 @@ async fn call_record_carries_parsed_usage() {
 #[tokio::test]
 async fn disallowed_model_is_rejected_without_calling_upstream() {
     let seen = Seen::default();
-    let (relay, log_dir) =
-        relay_with(upstream_recording(seen.clone()).await, |c| c.rules.allow_models = vec!["^gpt-".into()]).await;
+    let (relay, log_dir) = relay_with(upstream_recording(seen.clone()).await, |c| {
+        c.rules.allow_models = vec!["^gpt-".into()]
+    })
+    .await;
     let (status, body) = post(relay, SIMPLE).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
     let err: serde_json::Value = serde_json::from_slice(&body).unwrap();
@@ -113,7 +121,10 @@ async fn disallowed_model_is_rejected_without_calling_upstream() {
 async fn stream_is_cut_by_pattern_rule() {
     let seen = Seen::default();
     let (relay, log_dir) = relay_with(upstream_recording(seen.clone()).await, |c| {
-        c.rules.cut_patterns = vec![CutPattern { name: "no-forty-two".into(), pattern: "forty-two".into() }]
+        c.rules.cut_patterns = vec![CutPattern {
+            name: "no-forty-two".into(),
+            pattern: "forty-two".into(),
+        }]
     })
     .await;
     let (status, body) = post(relay, SIMPLE).await;
@@ -129,7 +140,11 @@ async fn stream_is_cut_by_pattern_rule() {
 async fn long_tool_output_is_trimmed_before_upstream() {
     let seen = Seen::default();
     let (relay, log_dir) = relay_with(upstream_recording(seen.clone()).await, |c| {
-        c.transforms.tool_output = Some(ToolOutputTrim { max_chars: 100, keep_head: 10, keep_tail: 10 })
+        c.transforms.tool_output = Some(ToolOutputTrim {
+            max_chars: 100,
+            keep_head: 10,
+            keep_tail: 10,
+        })
     })
     .await;
     let long = "x".repeat(5000);

@@ -66,9 +66,16 @@ async fn client_disconnect_mid_stream_still_produces_a_call_record() {
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
 
-    assert_eq!(records.len(), 1, "a disconnected call must still be recorded exactly once");
+    assert_eq!(
+        records.len(),
+        1,
+        "a disconnected call must still be recorded exactly once"
+    );
     let record = &records[0];
     assert_eq!(record["status"], 200);
     let error = record["error"].as_str().unwrap_or_default();
-    assert!(!error.is_empty(), "a mid-stream disconnect must be recorded as an error, got: {record}");
+    assert!(
+        !error.is_empty(),
+        "a mid-stream disconnect must be recorded as an error, got: {record}"
+    );
 }

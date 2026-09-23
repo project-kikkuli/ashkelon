@@ -44,12 +44,19 @@ enum Command {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    tracing_subscriber::fmt().with_env_filter(tracing_subscriber::EnvFilter::from_default_env()).with_writer(std::io::stderr).init();
+    tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .with_writer(std::io::stderr)
+        .init();
     let cli = Cli::parse();
     let cfg = Arc::new(ashkelon::config::Config::load(cli.config.as_deref())?);
     match cli.command {
         Command::Serve => serve(cfg).await,
-        Command::Run { harness, no_channel, args } => run(cfg, &harness, no_channel, &args).await,
+        Command::Run {
+            harness,
+            no_channel,
+            args,
+        } => run(cfg, &harness, no_channel, &args).await,
         Command::Model { name, system } => model(cfg, &name, system.as_deref()).await,
         Command::Channel { socket } => ashkelon::wake::channel::run(&socket).await,
     }
@@ -57,7 +64,9 @@ async fn main() -> anyhow::Result<()> {
 
 async fn serve(cfg: Arc<ashkelon::config::Config>) -> anyhow::Result<()> {
     let addr = cfg.listen.clone().unwrap_or_else(|| "127.0.0.1:8484".to_string());
-    let listener = tokio::net::TcpListener::bind(&addr).await.with_context(|| format!("binding {addr}"))?;
+    let listener = tokio::net::TcpListener::bind(&addr)
+        .await
+        .with_context(|| format!("binding {addr}"))?;
     let engine = ashkelon::hooks::Engine::new(cfg.clone());
 
     ashkelon::hooks::Engine::start(&engine);
@@ -65,8 +74,15 @@ async fn serve(cfg: Arc<ashkelon::config::Config>) -> anyhow::Result<()> {
     ashkelon::relay::serve(cfg, listener, engine).await
 }
 
-async fn run(cfg: Arc<ashkelon::config::Config>, harness: &str, no_channel: bool, args: &[String]) -> anyhow::Result<()> {
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.context("binding relay listener")?;
+async fn run(
+    cfg: Arc<ashkelon::config::Config>,
+    harness: &str,
+    no_channel: bool,
+    args: &[String],
+) -> anyhow::Result<()> {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .context("binding relay listener")?;
     let port = listener.local_addr()?.port();
     let launch = random_hex_id();
     let relay_base = format!("http://127.0.0.1:{port}/s/{launch}");
@@ -84,7 +100,10 @@ async fn run(cfg: Arc<ashkelon::config::Config>, harness: &str, no_channel: bool
         }
     });
 
-    let options = ashkelon::launch::LaunchOptions { state_dir: cfg.state_dir(), no_channel };
+    let options = ashkelon::launch::LaunchOptions {
+        state_dir: cfg.state_dir(),
+        no_channel,
+    };
     let mut plan = ashkelon::launch::plan(harness, &relay_base, &launch, args, &options)?;
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
 
@@ -98,7 +117,9 @@ async fn run(cfg: Arc<ashkelon::config::Config>, harness: &str, no_channel: bool
         cmd.stdout(std::process::Stdio::piped());
         cmd.stderr(std::process::Stdio::piped());
         cmd.kill_on_drop(true);
-        let mut child = cmd.spawn().with_context(|| format!("spawning companion process {}", companion.program))?;
+        let mut child = cmd
+            .spawn()
+            .with_context(|| format!("spawning companion process {}", companion.program))?;
         let stdout = child.stdout.take().expect("companion stdout was piped");
         let stderr = child.stderr.take().expect("companion stderr was piped");
         let companion_url = wait_for_companion_ready(stdout, stderr, &companion.ready_pattern).await?;
@@ -116,7 +137,9 @@ async fn run(cfg: Arc<ashkelon::config::Config>, harness: &str, no_channel: bool
     for (key, value) in &plan.env {
         cmd.env(key, value);
     }
-    let mut child = cmd.spawn().with_context(|| format!("spawning harness process {}", plan.program))?;
+    let mut child = cmd
+        .spawn()
+        .with_context(|| format!("spawning harness process {}", plan.program))?;
 
     #[cfg(unix)]
     let _ignore_sigint = {
@@ -168,9 +191,12 @@ async fn wait_for_companion_ready(
     let out_lines = tokio::io::BufReader::new(stdout).lines();
     let err_lines = tokio::io::BufReader::new(stderr).lines();
 
-    let (url, out_lines, err_lines) = tokio::time::timeout(std::time::Duration::from_secs(10), find_ready_line(out_lines, err_lines, pattern))
-        .await
-        .map_err(|_| anyhow::anyhow!("timed out waiting for companion process to report its address"))??;
+    let (url, out_lines, err_lines) = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        find_ready_line(out_lines, err_lines, pattern),
+    )
+    .await
+    .map_err(|_| anyhow::anyhow!("timed out waiting for companion process to report its address"))??;
 
     tokio::spawn(drain(out_lines));
     tokio::spawn(drain(err_lines));
@@ -182,7 +208,11 @@ async fn find_ready_line(
     mut out_lines: LineStream<tokio::process::ChildStdout>,
     mut err_lines: LineStream<tokio::process::ChildStderr>,
     pattern: &regex::Regex,
-) -> anyhow::Result<(String, LineStream<tokio::process::ChildStdout>, LineStream<tokio::process::ChildStderr>)> {
+) -> anyhow::Result<(
+    String,
+    LineStream<tokio::process::ChildStdout>,
+    LineStream<tokio::process::ChildStderr>,
+)> {
     let mut out_done = false;
     let mut err_done = false;
     loop {
@@ -221,7 +251,9 @@ async fn drain<T: tokio::io::AsyncRead + Unpin>(mut lines: LineStream<T>) {
 
 async fn model(cfg: Arc<ashkelon::config::Config>, name: &str, system: Option<&str>) -> anyhow::Result<()> {
     let mut prompt = String::new();
-    std::io::stdin().read_to_string(&mut prompt).context("reading prompt from stdin")?;
+    std::io::stdin()
+        .read_to_string(&mut prompt)
+        .context("reading prompt from stdin")?;
     let response = ashkelon::model::complete(&cfg, name, system, &prompt).await?;
     println!("{response}");
     Ok(())

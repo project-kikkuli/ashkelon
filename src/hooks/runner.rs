@@ -13,7 +13,10 @@ use super::types::{event_name, HookTrigger};
 /// What a hook run amounted to.
 pub enum Outcome {
     Pass,
-    Fail { message: String, fix: Option<String> },
+    Fail {
+        message: String,
+        fix: Option<String>,
+    },
     /// The process did not answer within `timeout_secs` and was killed.
     Timeout,
     /// Spawn failure, non-JSON stdout, or a status other than pass/fail.
@@ -49,7 +52,10 @@ pub async fn run_hook(
     let _permit = semaphore.acquire().await;
 
     let Some((program, args)) = hook.command.split_first() else {
-        return RunResult { outcome: Outcome::Error("empty hook command".into()), duration_ms: elapsed_ms(start) };
+        return RunResult {
+            outcome: Outcome::Error("empty hook command".into()),
+            duration_ms: elapsed_ms(start),
+        };
     };
 
     let payload = build_payload(hook, key, trigger, cwd, session_dir);
@@ -64,7 +70,13 @@ pub async fn run_hook(
     };
 
     let mut cmd = tokio::process::Command::new(super::matching::expand_tilde(program));
-    cmd.args(args.iter().map(|a| if a.starts_with('~') { super::matching::expand_tilde(a).into_os_string() } else { a.into() }));
+    cmd.args(args.iter().map(|a| {
+        if a.starts_with('~') {
+            super::matching::expand_tilde(a).into_os_string()
+        } else {
+            a.into()
+        }
+    }));
     cmd.current_dir(cwd.map(Path::to_path_buf).unwrap_or_else(fallback_dir));
     cmd.stdin(std::process::Stdio::piped());
     cmd.stdout(std::process::Stdio::piped());
@@ -78,7 +90,10 @@ pub async fn run_hook(
     let mut child = match cmd.spawn() {
         Ok(c) => c,
         Err(e) => {
-            return RunResult { outcome: Outcome::Error(format!("spawn: {e}")), duration_ms: elapsed_ms(start) }
+            return RunResult {
+                outcome: Outcome::Error(format!("spawn: {e}")),
+                duration_ms: elapsed_ms(start),
+            }
         }
     };
 
@@ -88,7 +103,10 @@ pub async fn run_hook(
     }
 
     let Some(mut stdout) = child.stdout.take() else {
-        return RunResult { outcome: Outcome::Error("no stdout pipe".into()), duration_ms: elapsed_ms(start) };
+        return RunResult {
+            outcome: Outcome::Error("no stdout pipe".into()),
+            duration_ms: elapsed_ms(start),
+        };
     };
 
     let timeout = Duration::from_secs(hook.timeout_secs);
@@ -108,7 +126,10 @@ pub async fn run_hook(
         }
     };
 
-    RunResult { outcome, duration_ms: elapsed_ms(start) }
+    RunResult {
+        outcome,
+        duration_ms: elapsed_ms(start),
+    }
 }
 
 fn elapsed_ms(start: Instant) -> u64 {
@@ -123,7 +144,10 @@ fn parse_output(buf: &[u8]) -> Outcome {
     match serde_json::from_slice::<HookOutput>(buf) {
         Ok(out) => match out.status.as_str() {
             "pass" => Outcome::Pass,
-            "fail" => Outcome::Fail { message: out.message.unwrap_or_default(), fix: out.fix },
+            "fail" => Outcome::Fail {
+                message: out.message.unwrap_or_default(),
+                fix: out.fix,
+            },
             other => Outcome::Error(format!("unknown hook status: {other}")),
         },
         Err(e) => Outcome::Error(format!("bad hook output: {e}")),
@@ -164,11 +188,12 @@ fn build_payload(
 }
 
 pub fn now_rfc3339() -> String {
-    time::OffsetDateTime::now_utc().format(&time::format_description::well_known::Rfc3339).unwrap_or_default()
+    time::OffsetDateTime::now_utc()
+        .format(&time::format_description::well_known::Rfc3339)
+        .unwrap_or_default()
 }
 
 pub fn today_date() -> String {
     let now = time::OffsetDateTime::now_utc();
     format!("{:04}-{:02}-{:02}", now.year(), u8::from(now.month()), now.day())
 }
-

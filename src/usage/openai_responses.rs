@@ -1,6 +1,8 @@
 use serde_json::Value;
 
-use super::common::{extract_error_message, parse_event_json, str_field, u64_field, EventSink, StreamOrBody, TextTracker};
+use super::common::{
+    extract_error_message, parse_event_json, str_field, u64_field, EventSink, StreamOrBody, TextTracker,
+};
 use super::{ResponseParser, Summary, ToolCall, Usage};
 
 /// Item types the platform surfaces as client tool calls. `web_search_call` and
@@ -39,13 +41,21 @@ impl ResponsesSink {
         if let Some(v) = u64_field(usage, "input_tokens") {
             self.input_tokens = Some(v);
         }
-        if let Some(v) = usage.get("input_tokens_details").and_then(|d| d.get("cached_tokens")).and_then(|v| v.as_u64()) {
+        if let Some(v) = usage
+            .get("input_tokens_details")
+            .and_then(|d| d.get("cached_tokens"))
+            .and_then(|v| v.as_u64())
+        {
             self.cache_read = Some(v);
         }
         if let Some(v) = u64_field(usage, "output_tokens") {
             self.output_tokens = Some(v);
         }
-        if let Some(v) = usage.get("output_tokens_details").and_then(|d| d.get("reasoning_tokens")).and_then(|v| v.as_u64()) {
+        if let Some(v) = usage
+            .get("output_tokens_details")
+            .and_then(|d| d.get("reasoning_tokens"))
+            .and_then(|v| v.as_u64())
+        {
             self.reasoning_exact = Some(v);
         }
     }
@@ -138,7 +148,9 @@ impl EventSink for ResponsesSink {
     }
 
     fn on_body(&mut self, body: &[u8]) {
-        let Ok(value) = serde_json::from_slice::<Value>(body) else { return };
+        let Ok(value) = serde_json::from_slice::<Value>(body) else {
+            return;
+        };
         self.take_model_id(&value);
         if let Some(s) = str_field(&value, "status") {
             self.status = Some(s);
@@ -203,7 +215,9 @@ pub struct ResponsesParser {
 
 impl ResponsesParser {
     pub fn new() -> Self {
-        ResponsesParser { inner: StreamOrBody::new(ResponsesSink::default()) }
+        ResponsesParser {
+            inner: StreamOrBody::new(ResponsesSink::default()),
+        }
     }
 }
 

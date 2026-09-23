@@ -34,7 +34,11 @@ impl FakeServer {
                 let _ = request.respond(response);
             }
         });
-        FakeServer { addr, captured_headers: captured, handle: Some(handle) }
+        FakeServer {
+            addr,
+            captured_headers: captured,
+            handle: Some(handle),
+        }
     }
 
     fn base_url(&self) -> String {
@@ -52,7 +56,13 @@ impl FakeServer {
 
     fn header(&self, name: &str) -> Option<String> {
         self.wait_for_request();
-        self.captured_headers.lock().unwrap().as_ref()?.iter().find(|(k, _)| k.eq_ignore_ascii_case(name)).map(|(_, v)| v.clone())
+        self.captured_headers
+            .lock()
+            .unwrap()
+            .as_ref()?
+            .iter()
+            .find(|(k, _)| k.eq_ignore_ascii_case(name))
+            .map(|(_, v)| v.clone())
     }
 }
 
@@ -65,7 +75,10 @@ impl Drop for FakeServer {
 }
 
 fn cfg_with_model(model: ModelConfig) -> Config {
-    Config { models: vec![model], ..Config::default() }
+    Config {
+        models: vec![model],
+        ..Config::default()
+    }
 }
 
 fn set_env(name: &str, value: &str) {
@@ -76,7 +89,10 @@ fn set_env(name: &str, value: &str) {
 
 #[tokio::test]
 async fn anthropic_extracts_text_and_sends_api_key_header() {
-    let server = FakeServer::start(r#"{"content":[{"type":"text","text":"hello from anthropic"}]}"#.into(), 200);
+    let server = FakeServer::start(
+        r#"{"content":[{"type":"text","text":"hello from anthropic"}]}"#.into(),
+        200,
+    );
     set_env("ASHKELON_TEST_ANTHROPIC_KEY", "sk-ant-test");
     let cfg = cfg_with_model(ModelConfig {
         name: "claude".into(),
@@ -121,7 +137,10 @@ async fn openai_responses_extracts_output_text_shortcut() {
 
     let out = complete(&cfg, "gpt", None, "hi").await.unwrap();
     assert_eq!(out, "hi from responses");
-    assert_eq!(server.header("authorization"), Some("Bearer sk-openai-test".to_string()));
+    assert_eq!(
+        server.header("authorization"),
+        Some("Bearer sk-openai-test".to_string())
+    );
 }
 
 #[tokio::test]

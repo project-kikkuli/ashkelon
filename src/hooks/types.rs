@@ -11,19 +11,39 @@ pub struct HookTrigger {
 
 impl HookTrigger {
     pub fn new(event: HookEvent) -> HookTrigger {
-        HookTrigger { event, prompt: None, tool_calls: Vec::new(), text: None }
+        HookTrigger {
+            event,
+            prompt: None,
+            tool_calls: Vec::new(),
+            text: None,
+        }
     }
 
     pub fn with_prompt(event: HookEvent, prompt: String) -> HookTrigger {
-        HookTrigger { event, prompt: Some(prompt), tool_calls: Vec::new(), text: None }
+        HookTrigger {
+            event,
+            prompt: Some(prompt),
+            tool_calls: Vec::new(),
+            text: None,
+        }
     }
 
     pub fn with_tool_calls(event: HookEvent, tool_calls: Vec<String>) -> HookTrigger {
-        HookTrigger { event, prompt: None, tool_calls, text: None }
+        HookTrigger {
+            event,
+            prompt: None,
+            tool_calls,
+            text: None,
+        }
     }
 
     pub fn with_text(event: HookEvent, text: String) -> HookTrigger {
-        HookTrigger { event, prompt: None, tool_calls: Vec::new(), text: Some(text) }
+        HookTrigger {
+            event,
+            prompt: None,
+            tool_calls: Vec::new(),
+            text: Some(text),
+        }
     }
 }
 

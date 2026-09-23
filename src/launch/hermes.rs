@@ -66,13 +66,19 @@ pub fn plan(relay_base: &str, launch: &str, args: &[String], options: &LaunchOpt
 
     build_home_overlay(&real_home, &overlay_dir, CONFIG_FILE).context("building the Hermes home overlay")?;
     let config_path = overlay_dir.join(CONFIG_FILE);
-    std::fs::write(&config_path, serde_yaml::to_string(&overlaid_config)?).context("writing the overlaid Hermes config.yaml")?;
+    std::fs::write(&config_path, serde_yaml::to_string(&overlaid_config)?)
+        .context("writing the overlaid Hermes config.yaml")?;
 
     let mut plan = LaunchPlan::new("hermes", "hermes");
-    plan.env.push(("HERMES_HOME".to_string(), overlay_dir.to_string_lossy().into_owned()));
+    plan.env
+        .push(("HERMES_HOME".to_string(), overlay_dir.to_string_lossy().into_owned()));
     plan.args = vec!["--provider".to_string(), PROVIDER_NAME.to_string()];
     plan.args.extend(args.iter().cloned());
-    plan.overlay_home = Some(OverlayHome { overlay_dir, real_home, generated_file_name: CONFIG_FILE.to_string() });
+    plan.overlay_home = Some(OverlayHome {
+        overlay_dir,
+        real_home,
+        generated_file_name: CONFIG_FILE.to_string(),
+    });
     // No verified local wake channel for Hermes (never executed to check further, per the hard
     // safety rule); tmux is the only path.
     Ok(plan)
@@ -88,17 +94,29 @@ fn hermes_home() -> PathBuf {
 }
 
 fn configured_provider_name(config: &serde_yaml::Value) -> Option<String> {
-    config.get("model")?.get("provider")?.as_str().map(|s| s.trim().to_lowercase())
+    config
+        .get("model")?
+        .get("provider")?
+        .as_str()
+        .map(|s| s.trim().to_lowercase())
 }
 
-fn detect_relay_route(relay_base: &str, configured: Option<&str>, real_home: &Path) -> anyhow::Result<(String, &'static str, &'static str)> {
+fn detect_relay_route(
+    relay_base: &str,
+    configured: Option<&str>,
+    real_home: &Path,
+) -> anyhow::Result<(String, &'static str, &'static str)> {
     let normalized = configured.unwrap_or("auto");
     let is_anthropic = matches!(normalized, "anthropic" | "claude" | "claude-code");
     let is_openrouter = normalized == "openrouter";
 
     if is_anthropic {
         if has_env_credential(real_home, "ANTHROPIC_API_KEY") {
-            return Ok((format!("{relay_base}/anthropic"), "ANTHROPIC_API_KEY", "anthropic_messages"));
+            return Ok((
+                format!("{relay_base}/anthropic"),
+                "ANTHROPIC_API_KEY",
+                "anthropic_messages",
+            ));
         }
         anyhow::bail!(
             "refusing to launch hermes: its configured provider is anthropic but no ANTHROPIC_API_KEY is set \
@@ -110,7 +128,11 @@ fn detect_relay_route(relay_base: &str, configured: Option<&str>, real_home: &Pa
 
     if is_openrouter || normalized == "auto" {
         if has_env_credential(real_home, "OPENROUTER_API_KEY") {
-            return Ok((format!("{relay_base}/openrouter/api/v1"), "OPENROUTER_API_KEY", "chat_completions"));
+            return Ok((
+                format!("{relay_base}/openrouter/api/v1"),
+                "OPENROUTER_API_KEY",
+                "chat_completions",
+            ));
         }
         if is_openrouter {
             anyhow::bail!(
@@ -131,7 +153,9 @@ fn has_env_credential(real_home: &Path, name: &str) -> bool {
     if std::env::var(name).map(|v| !v.trim().is_empty()).unwrap_or(false) {
         return true;
     }
-    dotenv_value(&real_home.join(".env"), name).map(|v| !v.trim().is_empty()).unwrap_or(false)
+    dotenv_value(&real_home.join(".env"), name)
+        .map(|v| !v.trim().is_empty())
+        .unwrap_or(false)
 }
 
 /// Minimal `.env` reader: `NAME=value` lines, `#` comments, no quoting/escaping/expansion —
@@ -143,7 +167,9 @@ fn dotenv_value(path: &Path, name: &str) -> Option<String> {
         if line.is_empty() || line.starts_with('#') {
             continue;
         }
-        let Some((key, value)) = line.split_once('=') else { continue };
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
         if key.trim() == name {
             return Some(value.trim().trim_matches('"').trim_matches('\'').to_string());
         }
@@ -158,17 +184,31 @@ fn with_relay_provider(mut config: serde_yaml::Value, api: &str, key_env: &str, 
     let mapping = config.as_mapping_mut().expect("just ensured this is a mapping");
 
     let providers_key = serde_yaml::Value::String("providers".to_string());
-    let providers = mapping.entry(providers_key).or_insert_with(|| serde_yaml::Value::Mapping(serde_yaml::Mapping::new()));
+    let providers = mapping
+        .entry(providers_key)
+        .or_insert_with(|| serde_yaml::Value::Mapping(serde_yaml::Mapping::new()));
     if !providers.is_mapping() {
         *providers = serde_yaml::Value::Mapping(serde_yaml::Mapping::new());
     }
     let providers_mapping = providers.as_mapping_mut().expect("just ensured this is a mapping");
 
     let mut entry = serde_yaml::Mapping::new();
-    entry.insert(serde_yaml::Value::String("api".to_string()), serde_yaml::Value::String(api.to_string()));
-    entry.insert(serde_yaml::Value::String("key_env".to_string()), serde_yaml::Value::String(key_env.to_string()));
-    entry.insert(serde_yaml::Value::String("api_mode".to_string()), serde_yaml::Value::String(api_mode.to_string()));
-    providers_mapping.insert(serde_yaml::Value::String(PROVIDER_NAME.to_string()), serde_yaml::Value::Mapping(entry));
+    entry.insert(
+        serde_yaml::Value::String("api".to_string()),
+        serde_yaml::Value::String(api.to_string()),
+    );
+    entry.insert(
+        serde_yaml::Value::String("key_env".to_string()),
+        serde_yaml::Value::String(key_env.to_string()),
+    );
+    entry.insert(
+        serde_yaml::Value::String("api_mode".to_string()),
+        serde_yaml::Value::String(api_mode.to_string()),
+    );
+    providers_mapping.insert(
+        serde_yaml::Value::String(PROVIDER_NAME.to_string()),
+        serde_yaml::Value::Mapping(entry),
+    );
 
     config
 }

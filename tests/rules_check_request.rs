@@ -4,11 +4,17 @@ use ashkelon::wire::Wire;
 use serde_json::json;
 
 fn allow_models_cfg(patterns: &[&str]) -> RuleConfig {
-    RuleConfig { allow_models: patterns.iter().map(|s| s.to_string()).collect(), ..RuleConfig::default() }
+    RuleConfig {
+        allow_models: patterns.iter().map(|s| s.to_string()).collect(),
+        ..RuleConfig::default()
+    }
 }
 
 fn max_tokens_cfg(cap: u64) -> RuleConfig {
-    RuleConfig { max_output_tokens: Some(cap), ..RuleConfig::default() }
+    RuleConfig {
+        max_output_tokens: Some(cap),
+        ..RuleConfig::default()
+    }
 }
 
 fn is_reject(d: &PreDecision) -> bool {
@@ -19,7 +25,10 @@ fn is_reject(d: &PreDecision) -> bool {
 fn allow_models_admits_a_matching_model() {
     let cfg = allow_models_cfg(&["^claude-.*$"]);
     let body = json!({"model": "claude-opus-4"}).to_string();
-    assert!(matches!(check_request(Wire::AnthropicMessages, &cfg, body.as_bytes()), PreDecision::Allow));
+    assert!(matches!(
+        check_request(Wire::AnthropicMessages, &cfg, body.as_bytes()),
+        PreDecision::Allow
+    ));
 }
 
 #[test]
@@ -39,30 +48,47 @@ fn allow_models_rejects_a_non_matching_model() {
 fn allow_models_rejects_a_missing_model_field() {
     let cfg = allow_models_cfg(&["^claude-.*$"]);
     let body = json!({}).to_string();
-    assert!(is_reject(&check_request(Wire::AnthropicMessages, &cfg, body.as_bytes())));
+    assert!(is_reject(&check_request(
+        Wire::AnthropicMessages,
+        &cfg,
+        body.as_bytes()
+    )));
 }
 
 #[test]
 fn empty_allow_models_admits_anything() {
     let cfg = RuleConfig::default();
     let body = json!({"model": "anything-goes"}).to_string();
-    assert!(matches!(check_request(Wire::AnthropicMessages, &cfg, body.as_bytes()), PreDecision::Allow));
+    assert!(matches!(
+        check_request(Wire::AnthropicMessages, &cfg, body.as_bytes()),
+        PreDecision::Allow
+    ));
 }
 
 #[test]
 fn an_invalid_allow_models_pattern_is_ignored_but_others_still_apply() {
     let cfg = allow_models_cfg(&["(unclosed", "^claude-.*$"]);
     let matching = json!({"model": "claude-haiku"}).to_string();
-    assert!(matches!(check_request(Wire::AnthropicMessages, &cfg, matching.as_bytes()), PreDecision::Allow));
+    assert!(matches!(
+        check_request(Wire::AnthropicMessages, &cfg, matching.as_bytes()),
+        PreDecision::Allow
+    ));
     let non_matching = json!({"model": "gpt-4"}).to_string();
-    assert!(is_reject(&check_request(Wire::AnthropicMessages, &cfg, non_matching.as_bytes())));
+    assert!(is_reject(&check_request(
+        Wire::AnthropicMessages,
+        &cfg,
+        non_matching.as_bytes()
+    )));
 }
 
 #[test]
 fn max_output_tokens_allows_under_the_cap() {
     let cfg = max_tokens_cfg(100);
     let body = json!({"model": "claude", "max_tokens": 50}).to_string();
-    assert!(matches!(check_request(Wire::AnthropicMessages, &cfg, body.as_bytes()), PreDecision::Allow));
+    assert!(matches!(
+        check_request(Wire::AnthropicMessages, &cfg, body.as_bytes()),
+        PreDecision::Allow
+    ));
 }
 
 #[test]
@@ -96,13 +122,19 @@ fn max_output_tokens_rejects_chat_max_completion_tokens_over_the_cap() {
 fn no_cap_configured_allows_any_token_count() {
     let cfg = RuleConfig::default();
     let body = json!({"model": "claude", "max_tokens": 999_999}).to_string();
-    assert!(matches!(check_request(Wire::AnthropicMessages, &cfg, body.as_bytes()), PreDecision::Allow));
+    assert!(matches!(
+        check_request(Wire::AnthropicMessages, &cfg, body.as_bytes()),
+        PreDecision::Allow
+    ));
 }
 
 #[test]
 fn unparseable_body_is_allowed() {
     let cfg = allow_models_cfg(&["^claude-.*$"]);
-    assert!(matches!(check_request(Wire::AnthropicMessages, &cfg, b"not json"), PreDecision::Allow));
+    assert!(matches!(
+        check_request(Wire::AnthropicMessages, &cfg, b"not json"),
+        PreDecision::Allow
+    ));
 }
 
 // ---- reject_response shapes ----

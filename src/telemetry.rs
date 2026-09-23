@@ -71,12 +71,15 @@ impl Writer {
     pub fn new(log_dir: impl Into<PathBuf>) -> std::io::Result<Writer> {
         let log_dir = log_dir.into();
         create_dir_private(&log_dir)?;
-        Ok(Writer { log_dir, lock: Mutex::new(()) })
+        Ok(Writer {
+            log_dir,
+            lock: Mutex::new(()),
+        })
     }
 
     pub fn write(&self, record: &CallRecord) -> std::io::Result<()> {
-        let line = serde_json::to_string(record)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        let line =
+            serde_json::to_string(record).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         let date = OffsetDateTime::now_utc().date();
         let filename = format!(
             "calls-{:04}-{:02}-{:02}.jsonl",
@@ -140,7 +143,11 @@ mod tests {
         CallRecord {
             ts: now_ts(),
             call_id: "call-1".to_string(),
-            session: SessionKey { launch: None, harness: None, session: "s1".to_string() },
+            session: SessionKey {
+                launch: None,
+                harness: None,
+                session: "s1".to_string(),
+            },
             route: "anthropic".to_string(),
             wire: Wire::AnthropicMessages,
             method: "POST".to_string(),
@@ -170,8 +177,12 @@ mod tests {
         writer.write(&sample_record()).unwrap();
 
         let date = OffsetDateTime::now_utc().date();
-        let filename =
-            format!("calls-{:04}-{:02}-{:02}.jsonl", date.year(), u8::from(date.month()), date.day());
+        let filename = format!(
+            "calls-{:04}-{:02}-{:02}.jsonl",
+            date.year(),
+            u8::from(date.month()),
+            date.day()
+        );
         let contents = fs::read_to_string(dir.path().join(filename)).unwrap();
         let lines: Vec<&str> = contents.lines().collect();
         assert_eq!(lines.len(), 2);
@@ -204,9 +215,17 @@ mod tests {
         assert_eq!(dir_mode, 0o700);
 
         let date = OffsetDateTime::now_utc().date();
-        let filename =
-            format!("calls-{:04}-{:02}-{:02}.jsonl", date.year(), u8::from(date.month()), date.day());
-        let file_mode = fs::metadata(dir.path().join("logs").join(filename)).unwrap().permissions().mode() & 0o777;
+        let filename = format!(
+            "calls-{:04}-{:02}-{:02}.jsonl",
+            date.year(),
+            u8::from(date.month()),
+            date.day()
+        );
+        let file_mode = fs::metadata(dir.path().join("logs").join(filename))
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777;
         assert_eq!(file_mode, 0o600);
     }
 }

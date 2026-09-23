@@ -25,7 +25,11 @@ pub async fn send_message(
 /// each entry and returns the `id` of whichever is highest, so a caller with no better signal
 /// still reaches whichever session was interacted with most recently. `None` on anything that
 /// doesn't parse as expected, so a schema surprise falls through to tmux rather than erroring.
-pub async fn latest_session_id(http: &dyn HttpPoster, control: &str, authorization: Option<&str>) -> anyhow::Result<Option<String>> {
+pub async fn latest_session_id(
+    http: &dyn HttpPoster,
+    control: &str,
+    authorization: Option<&str>,
+) -> anyhow::Result<Option<String>> {
     let url = format!("{}/session", control.trim_end_matches('/'));
     let response = http.get_json(&url, authorization).await?;
     if !(200..300).contains(&response.status) {
@@ -37,7 +41,9 @@ pub async fn latest_session_id(http: &dyn HttpPoster, control: &str, authorizati
 
     let mut best: Option<(f64, String)> = None;
     for session in &sessions {
-        let Some(id) = session.get("id").and_then(|v| v.as_str()) else { continue };
+        let Some(id) = session.get("id").and_then(|v| v.as_str()) else {
+            continue;
+        };
         let timestamp = session
             .get("time")
             .and_then(|t| t.get("updated").or_else(|| t.get("created")))

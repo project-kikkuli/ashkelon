@@ -49,14 +49,24 @@ pub fn plan(relay_base: &str, launch: &str, args: &[String], options: &LaunchOpt
 
     build_home_overlay(&real_agent_dir, &overlay_dir, MODELS_FILE).context("building the omp agent-dir overlay")?;
     let models_path = overlay_dir.join(MODELS_FILE);
-    std::fs::write(&models_path, serde_yaml::to_string(&overlaid_models)?).context("writing the overlaid omp models.yml")?;
+    std::fs::write(&models_path, serde_yaml::to_string(&overlaid_models)?)
+        .context("writing the overlaid omp models.yml")?;
 
     let mut plan = LaunchPlan::new("omp", "omp");
-    plan.env.push(("ANTHROPIC_BASE_URL".to_string(), format!("{relay_base}/anthropic")));
-    plan.env.push(("OPENAI_BASE_URL".to_string(), format!("{relay_base}/openai/v1")));
-    plan.env.push(("PI_CODING_AGENT_DIR".to_string(), overlay_dir.to_string_lossy().into_owned()));
+    plan.env
+        .push(("ANTHROPIC_BASE_URL".to_string(), format!("{relay_base}/anthropic")));
+    plan.env
+        .push(("OPENAI_BASE_URL".to_string(), format!("{relay_base}/openai/v1")));
+    plan.env.push((
+        "PI_CODING_AGENT_DIR".to_string(),
+        overlay_dir.to_string_lossy().into_owned(),
+    ));
     plan.args = args.to_vec();
-    plan.overlay_home = Some(OverlayHome { overlay_dir, real_home: real_agent_dir, generated_file_name: MODELS_FILE.to_string() });
+    plan.overlay_home = Some(OverlayHome {
+        overlay_dir,
+        real_home: real_agent_dir,
+        generated_file_name: MODELS_FILE.to_string(),
+    });
     Ok(plan)
 }
 
@@ -66,7 +76,10 @@ fn agent_dir() -> PathBuf {
             return PathBuf::from(val);
         }
     }
-    dirs::home_dir().unwrap_or_else(|| PathBuf::from(".")).join(".omp").join("agent")
+    dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".omp")
+        .join("agent")
 }
 
 fn with_relay_overrides(mut models: serde_yaml::Value, relay_base: &str) -> serde_yaml::Value {
@@ -76,14 +89,24 @@ fn with_relay_overrides(mut models: serde_yaml::Value, relay_base: &str) -> serd
     let mapping = models.as_mapping_mut().expect("just ensured this is a mapping");
 
     let providers_key = serde_yaml::Value::String("providers".to_string());
-    let providers = mapping.entry(providers_key).or_insert_with(|| serde_yaml::Value::Mapping(serde_yaml::Mapping::new()));
+    let providers = mapping
+        .entry(providers_key)
+        .or_insert_with(|| serde_yaml::Value::Mapping(serde_yaml::Mapping::new()));
     if !providers.is_mapping() {
         *providers = serde_yaml::Value::Mapping(serde_yaml::Mapping::new());
     }
     let providers_mapping = providers.as_mapping_mut().expect("just ensured this is a mapping");
 
-    set_base_url(providers_mapping, "openrouter", format!("{relay_base}/openrouter/api/v1"));
-    set_base_url(providers_mapping, "openai-codex", format!("{relay_base}/chatgpt/backend-api"));
+    set_base_url(
+        providers_mapping,
+        "openrouter",
+        format!("{relay_base}/openrouter/api/v1"),
+    );
+    set_base_url(
+        providers_mapping,
+        "openai-codex",
+        format!("{relay_base}/chatgpt/backend-api"),
+    );
     set_base_url(providers_mapping, "ollama", format!("{relay_base}/ollama/v1"));
 
     models
@@ -91,12 +114,14 @@ fn with_relay_overrides(mut models: serde_yaml::Value, relay_base: &str) -> serd
 
 fn set_base_url(providers: &mut serde_yaml::Mapping, id: &str, base_url: String) {
     let key = serde_yaml::Value::String(id.to_string());
-    let entry = providers.entry(key).or_insert_with(|| serde_yaml::Value::Mapping(serde_yaml::Mapping::new()));
+    let entry = providers
+        .entry(key)
+        .or_insert_with(|| serde_yaml::Value::Mapping(serde_yaml::Mapping::new()));
     if !entry.is_mapping() {
         *entry = serde_yaml::Value::Mapping(serde_yaml::Mapping::new());
     }
-    entry
-        .as_mapping_mut()
-        .expect("just ensured this is a mapping")
-        .insert(serde_yaml::Value::String("baseUrl".to_string()), serde_yaml::Value::String(base_url));
+    entry.as_mapping_mut().expect("just ensured this is a mapping").insert(
+        serde_yaml::Value::String("baseUrl".to_string()),
+        serde_yaml::Value::String(base_url),
+    );
 }

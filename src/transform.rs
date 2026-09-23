@@ -20,7 +20,10 @@ pub struct Applied {
 /// requests keep producing the same prefix (needed for upstream prompt caching).
 pub fn apply(wire: Wire, cfg: &TransformConfig, body: &[u8]) -> Applied {
     let Ok(mut root) = serde_json::from_slice::<Value>(body) else {
-        return Applied { body: body.to_vec(), changed: Vec::new() };
+        return Applied {
+            body: body.to_vec(),
+            changed: Vec::new(),
+        };
     };
 
     let mut changed = Vec::new();
@@ -38,7 +41,10 @@ pub fn apply(wire: Wire, cfg: &TransformConfig, body: &[u8]) -> Applied {
     }
 
     if changed.is_empty() {
-        Applied { body: body.to_vec(), changed }
+        Applied {
+            body: body.to_vec(),
+            changed,
+        }
     } else {
         let bytes = serde_json::to_vec(&root).unwrap_or_else(|_| body.to_vec());
         Applied { body: bytes, changed }
@@ -47,7 +53,11 @@ pub fn apply(wire: Wire, cfg: &TransformConfig, body: &[u8]) -> Applied {
 
 fn warn_once(key: &str) -> bool {
     static WARNED: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
-    WARNED.get_or_init(|| Mutex::new(HashSet::new())).lock().unwrap().insert(key.to_string())
+    WARNED
+        .get_or_init(|| Mutex::new(HashSet::new()))
+        .lock()
+        .unwrap()
+        .insert(key.to_string())
 }
 
 fn apply_strip_rule(wire: Wire, rule: &StripRule, root: &mut Value) -> bool {
@@ -69,7 +79,9 @@ fn apply_strip_rule(wire: Wire, rule: &StripRule, root: &mut Value) -> bool {
 
 /// Shortens a single string field in place. Returns true when it was over `cfg.max_chars` and got cut.
 fn trim_string_field(cfg: &ToolOutputTrim, obj: &mut Value, field: &str) -> bool {
-    let Some(Value::String(s)) = obj.get_mut(field) else { return false };
+    let Some(Value::String(s)) = obj.get_mut(field) else {
+        return false;
+    };
     match trim_text(cfg, s) {
         Some(new_text) => {
             *s = new_text;
@@ -169,7 +181,9 @@ fn strip_user_content(re: &Regex, message: &mut Value) -> bool {
                 if block.get("type").and_then(Value::as_str) != Some("text") {
                     return true;
                 }
-                let Some(Value::String(text)) = block.get_mut("text") else { return true };
+                let Some(Value::String(text)) = block.get_mut("text") else {
+                    return true;
+                };
                 let stripped = re.replace_all(text, "").into_owned();
                 if stripped != *text {
                     changed = true;
@@ -210,7 +224,9 @@ fn apply_strip(wire: Wire, re: &Regex, root: &mut Value) -> bool {
                             if part.get("type").and_then(Value::as_str) != Some("input_text") {
                                 return true;
                             }
-                            let Some(Value::String(text)) = part.get_mut("text") else { return true };
+                            let Some(Value::String(text)) = part.get_mut("text") else {
+                                return true;
+                            };
                             let stripped = re.replace_all(text, "").into_owned();
                             if stripped != *text {
                                 changed = true;
@@ -270,7 +286,9 @@ fn inject_anthropic(root: &mut Value, pings: &[PinnedPing]) -> Option<()> {
         if let Value::String(s) = content {
             *content = Value::Array(vec![serde_json::json!({"type": "text", "text": s})]);
         }
-        content.as_array_mut()?.push(serde_json::json!({"type": "text", "text": ping.text}));
+        content
+            .as_array_mut()?
+            .push(serde_json::json!({"type": "text", "text": ping.text}));
     }
     Some(())
 }
@@ -316,9 +334,11 @@ fn inject_responses(root: &mut Value, pings: &[PinnedPing]) -> Option<()> {
 
 fn inject_chat(root: &mut Value, pings: &[PinnedPing]) -> Option<()> {
     let messages = root.get_mut("messages")?.as_array_mut()?;
-    insert_after_original_indices(messages, pings, |text| {
-        serde_json::json!({"role": "user", "content": text})
-    })
+    insert_after_original_indices(
+        messages,
+        pings,
+        |text| serde_json::json!({"role": "user", "content": text}),
+    )
 }
 
 /// Number of conversation items in a request, used as the anchor for a newly delivered ping.
