@@ -5,7 +5,7 @@ mod runner;
 mod state;
 mod types;
 
-pub use ping::Ping;
+pub use ping::{is_ping_text, Ping};
 use types::HookTrigger;
 
 use std::collections::HashMap;

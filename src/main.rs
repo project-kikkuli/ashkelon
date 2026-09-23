@@ -33,6 +33,10 @@ enum Command {
         #[arg(long)]
         system: Option<String>,
     },
+    /// A self-contained, credential-free walkthrough of the relay, hooks, transforms, and
+    /// rules against an in-process fake provider. Reads no config file and makes no real
+    /// network call.
+    Demo,
     /// The stdio MCP "channel" server `ashkelon run claude` registers itself as with Claude Code.
     /// Not meant to be run by hand.
     #[command(hide = true)]
@@ -49,6 +53,10 @@ async fn main() -> anyhow::Result<()> {
         .with_writer(std::io::stderr)
         .init();
     let cli = Cli::parse();
+    if matches!(cli.command, Command::Demo) {
+        // Self-contained: never reads the user's real config or touches real credentials.
+        return ashkelon::demo::run().await;
+    }
     let cfg = Arc::new(ashkelon::config::Config::load(cli.config.as_deref())?);
     match cli.command {
         Command::Serve => serve(cfg).await,
@@ -59,6 +67,7 @@ async fn main() -> anyhow::Result<()> {
         } => run(cfg, &harness, no_channel, &args).await,
         Command::Model { name, system } => model(cfg, &name, system.as_deref()).await,
         Command::Channel { socket } => ashkelon::wake::channel::run(&socket).await,
+        Command::Demo => unreachable!("handled above"),
     }
 }
 

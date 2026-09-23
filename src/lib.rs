@@ -1,4 +1,5 @@
 pub mod config;
+pub mod demo;
 pub mod hooks;
 pub mod launch;
 pub mod model;

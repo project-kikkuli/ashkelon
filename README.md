@@ -15,6 +15,20 @@ It never reads, stores, or refreshes an agent's login. It forwards the auth head
 cargo install --path .
 ```
 
+## Demo
+
+```sh
+ashkelon demo
+```
+
+Runs a self-contained walkthrough: no login, no config file, no real network call. It starts an
+in-process fake Anthropic provider, the real relay, and the real hook engine, then drives them
+through a scripted conversation and prints each step as it happens — the call-log line, a hook
+failing in the background, the ping it produces getting injected into the next request (with the
+injected text shown), the ping clearing once the hook passes on a later turn, a rule cutting a
+streaming response mid-flight, and a large tool result getting trimmed before the provider ever
+sees it.
+
 ## Run
 
 ```sh
