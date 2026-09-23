@@ -186,23 +186,9 @@ fn opencode_companion_url_resolves_into_args_and_wake_control() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-#[test]
-fn omp_routes_all_three_base_urls() {
-    let dir = state_dir("omp-base");
-    let plan = launch::plan("omp", BASE, LAUNCH, &[], &options(&dir)).unwrap();
-    assert_eq!(env_value(&plan.env, "ANTHROPIC_BASE_URL"), Some(format!("{BASE}/anthropic").as_str()));
-    assert_eq!(env_value(&plan.env, "OPENAI_BASE_URL"), Some(format!("{BASE}/openai").as_str()));
-    assert_eq!(env_value(&plan.env, "OPENROUTER_BASE_URL"), Some(format!("{BASE}/openrouter").as_str()));
-    let _ = std::fs::remove_dir_all(&dir);
-}
-
-#[test]
-fn omp_refuses_from_claude_import() {
-    let dir = state_dir("omp-refuse");
-    let err = launch::plan("omp", BASE, LAUNCH, &["--from-claude".to_string()], &options(&dir)).unwrap_err();
-    assert!(err.to_string().contains("--from-claude"));
-    let _ = std::fs::remove_dir_all(&dir);
-}
+// omp's plan() reads/builds a `PI_CODING_AGENT_DIR` overlay (see `launch::omp`), so its tests
+// live in `tests/launch_omp.rs` where that env var is guarded — never here, to avoid ever
+// touching the real `~/.omp/agent` from an unguarded test in this file.
 
 #[test]
 fn ori_routes_openrouter_without_api_v1_suffix() {

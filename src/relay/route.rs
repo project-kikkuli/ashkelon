@@ -18,6 +18,9 @@ fn builtin_upstream(name: &str) -> Option<&'static str> {
         "chatgpt" => Some("https://chatgpt.com"),
         "openrouter" => Some("https://openrouter.ai"),
         "opencode" => Some("https://opencode.ai"),
+        // Plain HTTP: the client already builds an `https_or_http()` connector, so a local
+        // Ollama server (never TLS-terminated) is forwarded exactly like any other upstream.
+        "ollama" => Some("http://127.0.0.1:11434"),
         _ => None,
     }
 }
@@ -116,5 +119,13 @@ mod tests {
         let cfg = Config::default();
         let parsed = resolve("/anthropic", &cfg).unwrap();
         assert_eq!(parsed.rest, "/");
+    }
+
+    #[test]
+    fn resolves_ollama_as_plain_http() {
+        let cfg = Config::default();
+        let parsed = resolve("/ollama/v1/chat/completions", &cfg).unwrap();
+        assert_eq!(parsed.upstream, "http://127.0.0.1:11434");
+        assert_eq!(parsed.rest, "/v1/chat/completions");
     }
 }
