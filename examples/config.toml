@@ -1,0 +1,58 @@
+# Copy to ~/.config/ashkelon/config.toml and edit.
+
+# listen = "127.0.0.1:8484"        # for `ashkelon serve`; `ashkelon run` picks a free port
+# log_bodies = false               # also keep request/response bodies next to the call log
+
+# [[routes]]                       # extra upstreams: requests to /local/... go to http://127.0.0.1:11434/...
+# name = "local"
+# upstream = "http://127.0.0.1:11434"
+
+[transforms.tool_output]
+max_chars = 60000
+keep_head = 20000
+keep_tail = 20000
+
+[rules]
+# allow_models = ["^claude-", "^gpt-5"]
+# max_output_tokens = 64000
+# max_response_chars = 400000
+# [[rules.cut_patterns]]
+# name = "runaway-repeat"
+# pattern = "(?s)(.{40,}?)\\1{8,}$"
+
+[pings]
+max_per_session = 20
+wake_idle = true
+idle_after_secs = 20
+max_concurrent_hooks = 4
+
+[[hooks]]
+name = "conflict-markers"
+on = ["turn_end"]
+command = ["~/.config/ashkelon/hooks/conflict-markers.sh"]
+
+[[hooks]]
+name = "tests-with-changes"
+on = ["turn_end"]
+command = ["~/.config/ashkelon/hooks/tests-with-changes.sh"]
+# projects = ["~/src/myproject"]
+
+[[hooks]]
+name = "diff-review"
+on = ["turn_end"]
+command = ["~/.config/ashkelon/hooks/diff-review.sh"]
+timeout_secs = 180
+
+# Models hooks can call with `$ASHKELON_BIN model <name>`. Never a harness login.
+[[models]]
+name = "fast"
+api = "openai_chat"
+base_url = "http://127.0.0.1:11434"   # any OpenAI-compatible server, e.g. a local one
+model = "qwen3:8b"
+
+# [[models]]
+# name = "fast"
+# api = "anthropic"
+# base_url = "https://api.anthropic.com"
+# model = "claude-haiku-4-5"
+# api_key_env = "ASHKELON_ANTHROPIC_KEY"
