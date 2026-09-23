@@ -7,11 +7,13 @@ description = "Local gateway for coding agents: byte-faithful relay, per-call te
 
 [dependencies]
 anyhow = "1"
+async-compression = { version = "0.4", features = ["tokio", "gzip", "brotli", "zstd", "deflate"] }
 bytes = "1"
 clap = { version = "4", features = ["derive"] }
 dirs = "6"
 futures-util = "0.3"
 http = "1"
+http-body = "1"
 http-body-util = "0.1"
 hyper = { version = "1", features = ["server", "client", "http1", "http2"] }
 hyper-rustls = { version = "0.27", default-features = false, features = ["http1", "http2", "ring", "webpki-roots", "rustls-native-certs"] }
@@ -25,6 +27,7 @@ regex = "1"
 thiserror = "2"
 time = { version = "0.3", features = ["formatting", "macros", "serde"] }
 tokio = { version = "1", features = ["full"] }
+tokio-stream = "0.1"
 toml = "0.9"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
@@ -32,3 +35,6 @@ uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
 tempfile = "3"
+flate2 = "1"
+zstd = "0.13"
+brotli = "6"
