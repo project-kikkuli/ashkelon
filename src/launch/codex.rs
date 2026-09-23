@@ -1,9 +1,10 @@
-use super::LaunchPlan;
+use super::{LaunchOptions, LaunchPlan};
 
-/// `codex queue --thread <id> --message <text>` wakes this harness once
-/// `WakeTarget::harness_session_id` is known (see `wake::codex`); nothing here needs to know
-/// that id up front.
-pub fn plan(relay_base: &str, _launch: &str, args: &[String]) -> anyhow::Result<LaunchPlan> {
+/// `codex queue --thread <id> --message <text>` wakes this harness. `--thread` takes "Session
+/// UUID or exact session name" per `codex queue --help`; codex reports a UUIDv7 session id on
+/// its own wire that the relay records as `SessionKey::session` regardless, so `wake::codex`
+/// falls back to that when nothing has separately populated `WakeTarget::harness_session_id`.
+pub fn plan(relay_base: &str, _launch: &str, args: &[String], _options: &LaunchOptions) -> anyhow::Result<LaunchPlan> {
     let mut plan = LaunchPlan::new("codex", "codex");
     let use_openai_api = args.iter().any(|a| a == "--openai-api");
     let passthrough: Vec<String> = args.iter().filter(|a| a.as_str() != "--openai-api").cloned().collect();

@@ -21,6 +21,9 @@ enum Command {
     /// Start a harness pointed at an in-process relay: `ashkelon run claude -- <args>`.
     Run {
         harness: String,
+        /// Skip wiring Claude Code's MCP channel wake mechanism.
+        #[arg(long)]
+        no_channel: bool,
         #[arg(last = true)]
         args: Vec<String>,
     },
@@ -29,6 +32,13 @@ enum Command {
         name: String,
         #[arg(long)]
         system: Option<String>,
+    },
+    /// The stdio MCP "channel" server `ashkelon run claude` registers itself as with Claude Code.
+    /// Not meant to be run by hand.
+    #[command(hide = true)]
+    Channel {
+        #[arg(long)]
+        socket: PathBuf,
     },
 }
 
@@ -39,8 +49,9 @@ async fn main() -> anyhow::Result<()> {
     let cfg = Arc::new(ashkelon::config::Config::load(cli.config.as_deref())?);
     match cli.command {
         Command::Serve => serve(cfg).await,
-        Command::Run { harness, args } => run(cfg, &harness, &args).await,
+        Command::Run { harness, no_channel, args } => run(cfg, &harness, no_channel, &args).await,
         Command::Model { name, system } => model(cfg, &name, system.as_deref()).await,
+        Command::Channel { socket } => ashkelon::wake::channel::run(&socket).await,
     }
 }
 
@@ -54,7 +65,7 @@ async fn serve(cfg: Arc<ashkelon::config::Config>) -> anyhow::Result<()> {
     ashkelon::relay::serve(cfg, listener, engine).await
 }
 
-async fn run(cfg: Arc<ashkelon::config::Config>, harness: &str, args: &[String]) -> anyhow::Result<()> {
+async fn run(cfg: Arc<ashkelon::config::Config>, harness: &str, no_channel: bool, args: &[String]) -> anyhow::Result<()> {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.context("binding relay listener")?;
     let port = listener.local_addr()?.port();
     let launch = random_hex_id();
@@ -73,7 +84,8 @@ async fn run(cfg: Arc<ashkelon::config::Config>, harness: &str, args: &[String])
         }
     });
 
-    let mut plan = ashkelon::launch::plan(harness, &relay_base, &launch, args)?;
+    let options = ashkelon::launch::LaunchOptions { state_dir: cfg.state_dir(), no_channel };
+    let mut plan = ashkelon::launch::plan(harness, &relay_base, &launch, args, &options)?;
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
 
     let mut companion_child = None;
@@ -83,12 +95,13 @@ async fn run(cfg: Arc<ashkelon::config::Config>, harness: &str, args: &[String])
         for (key, value) in &companion.env {
             cmd.env(key, value);
         }
-        cmd.stdout(std::process::Stdio::null());
+        cmd.stdout(std::process::Stdio::piped());
         cmd.stderr(std::process::Stdio::piped());
         cmd.kill_on_drop(true);
         let mut child = cmd.spawn().with_context(|| format!("spawning companion process {}", companion.program))?;
+        let stdout = child.stdout.take().expect("companion stdout was piped");
         let stderr = child.stderr.take().expect("companion stderr was piped");
-        let companion_url = wait_for_companion_ready(stderr, &companion.ready_pattern).await?;
+        let companion_url = wait_for_companion_ready(stdout, stderr, &companion.ready_pattern).await?;
         plan.resolve_companion_url(&companion_url);
         companion_child = Some(child);
     }
@@ -124,6 +137,13 @@ async fn run(cfg: Arc<ashkelon::config::Config>, harness: &str, args: &[String])
         let _ = companion.wait().await;
     }
     relay_task.abort();
+
+    if let Some(overlay) = &plan.overlay_home {
+        if let Err(e) = ashkelon::launch::reconcile_home_overlay(overlay) {
+            tracing::debug!("reconciling home overlay: {e:#}");
+        }
+        let _ = std::fs::remove_dir_all(&overlay.overlay_dir);
+    }
     for temp_file in &plan.temp_files {
         let _ = std::fs::remove_file(temp_file);
     }
@@ -131,30 +151,72 @@ async fn run(cfg: Arc<ashkelon::config::Config>, harness: &str, args: &[String])
     std::process::exit(status.code().unwrap_or(1));
 }
 
-async fn wait_for_companion_ready(stderr: tokio::process::ChildStderr, pattern: &regex::Regex) -> anyhow::Result<String> {
-    use tokio::io::{AsyncBufReadExt, BufReader};
+type LineStream<T> = tokio::io::Lines<tokio::io::BufReader<T>>;
 
-    let mut lines = BufReader::new(stderr).lines();
-    let find = async {
-        while let Some(line) = lines.next_line().await.context("reading companion process output")? {
-            if let Some(caps) = pattern.captures(&line) {
-                let host = &caps["host"];
-                let port = &caps["port"];
-                return Ok(format!("http://{host}:{port}"));
-            }
-        }
-        anyhow::bail!("companion process exited before reporting its address")
-    };
+/// Races the companion's stdout and stderr for the readiness banner (a live-run finding put
+/// opencode's on stdout, contrary to what its own `--print-logs` help text would suggest — so
+/// this never assumes which stream carries it), then keeps draining both for the rest of the
+/// companion's life so a full pipe buffer never makes it block on a write once nothing is
+/// actively reading its logs anymore.
+async fn wait_for_companion_ready(
+    stdout: tokio::process::ChildStdout,
+    stderr: tokio::process::ChildStderr,
+    pattern: &regex::Regex,
+) -> anyhow::Result<String> {
+    use tokio::io::AsyncBufReadExt;
 
-    let url = tokio::time::timeout(std::time::Duration::from_secs(10), find)
+    let out_lines = tokio::io::BufReader::new(stdout).lines();
+    let err_lines = tokio::io::BufReader::new(stderr).lines();
+
+    let (url, out_lines, err_lines) = tokio::time::timeout(std::time::Duration::from_secs(10), find_ready_line(out_lines, err_lines, pattern))
         .await
         .map_err(|_| anyhow::anyhow!("timed out waiting for companion process to report its address"))??;
 
-    // Keep draining stderr for the rest of the companion's life so a full pipe buffer never
-    // makes it block on a write once nothing is reading its logs anymore.
-    tokio::spawn(async move { while matches!(lines.next_line().await, Ok(Some(_))) {} });
+    tokio::spawn(drain(out_lines));
+    tokio::spawn(drain(err_lines));
 
     Ok(url)
+}
+
+async fn find_ready_line(
+    mut out_lines: LineStream<tokio::process::ChildStdout>,
+    mut err_lines: LineStream<tokio::process::ChildStderr>,
+    pattern: &regex::Regex,
+) -> anyhow::Result<(String, LineStream<tokio::process::ChildStdout>, LineStream<tokio::process::ChildStderr>)> {
+    let mut out_done = false;
+    let mut err_done = false;
+    loop {
+        if out_done && err_done {
+            anyhow::bail!("companion process exited before reporting its address");
+        }
+        tokio::select! {
+            line = out_lines.next_line(), if !out_done => {
+                match line.context("reading companion stdout")? {
+                    Some(line) => if let Some(url) = match_ready(pattern, &line) {
+                        return Ok((url, out_lines, err_lines));
+                    },
+                    None => out_done = true,
+                }
+            }
+            line = err_lines.next_line(), if !err_done => {
+                match line.context("reading companion stderr")? {
+                    Some(line) => if let Some(url) = match_ready(pattern, &line) {
+                        return Ok((url, out_lines, err_lines));
+                    },
+                    None => err_done = true,
+                }
+            }
+        }
+    }
+}
+
+fn match_ready(pattern: &regex::Regex, line: &str) -> Option<String> {
+    let caps = pattern.captures(line)?;
+    Some(format!("http://{}:{}", &caps["host"], &caps["port"]))
+}
+
+async fn drain<T: tokio::io::AsyncRead + Unpin>(mut lines: LineStream<T>) {
+    while matches!(lines.next_line().await, Ok(Some(_))) {}
 }
 
 async fn model(cfg: Arc<ashkelon::config::Config>, name: &str, system: Option<&str>) -> anyhow::Result<()> {

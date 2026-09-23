@@ -1,11 +1,11 @@
-use super::LaunchPlan;
+use super::{LaunchOptions, LaunchPlan};
 
 /// `--from-claude` imports a Claude Code session into omp's own auth-broker/session store; the
 /// routing report could not rule out that resolving `provider: anthropic` afterward reuses the
 /// imported Claude Code login rather than the relay-routed key, so this refuses outright instead
 /// of guessing. No verified local wake channel exists for omp either (its `collab` control-link
 /// feature defaults to a third-party relay, `wss://my.omp.sh`) — `wake` falls through to tmux.
-pub fn plan(relay_base: &str, _launch: &str, args: &[String]) -> anyhow::Result<LaunchPlan> {
+pub fn plan(relay_base: &str, _launch: &str, args: &[String], _options: &LaunchOptions) -> anyhow::Result<LaunchPlan> {
     if args.iter().any(|a| a == "--from-claude") {
         anyhow::bail!(
             "refusing to launch omp with --from-claude: it imports a Claude Code session into omp's own \

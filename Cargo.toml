@@ -8,6 +8,7 @@ description = "Local gateway for coding agents: byte-faithful relay, per-call te
 [dependencies]
 anyhow = "1"
 async-compression = { version = "0.4", features = ["tokio", "gzip", "brotli", "zstd", "deflate"] }
+base64 = "0.22"
 bytes = "1"
 clap = { version = "4", features = ["derive"] }
 dirs = "6"
@@ -22,6 +23,7 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order", "arbitrary_precision"] }
+serde_yaml = "0.9"
 sha2 = "0.10"
 hex = "0.4"
 regex = "1"
