@@ -95,6 +95,36 @@ fn overrides_openrouter_openai_codex_and_ollama_in_models_yml() {
         format!("{BASE}/chatgpt/backend-api")
     );
     assert_eq!(models["providers"]["ollama"]["baseUrl"], format!("{BASE}/ollama/v1"));
+    // Without this, overriding baseUrl alone drops omp's ollama discovery to zero models
+    // (bisected live: identical baseUrl through models.yml still breaks it; restating
+    // discovery.type is what restores it — see the module doc comment on launch::omp).
+    assert_eq!(models["providers"]["ollama"]["discovery"]["type"], "ollama");
+    // openrouter and openai-codex don't need this restated; only ollama silently loses its
+    // discovery type when overridden.
+    assert!(models["providers"]["openrouter"]["discovery"].is_null());
+    assert!(models["providers"]["openai-codex"]["discovery"].is_null());
+
+    let _ = std::fs::remove_dir_all(agent_dir.parent().unwrap());
+}
+
+#[test]
+fn ollama_discovery_type_override_preserves_a_sibling_discovery_key() {
+    let (agent_dir, state_dir) = fixture("ollama-discovery-preserve");
+    std::fs::write(
+        agent_dir.join("models.yml"),
+        "providers:\n  ollama:\n    discovery:\n      timeoutMs: 5000\n",
+    )
+    .unwrap();
+    let _guard = EnvGuard::set(&agent_dir);
+
+    let plan = launch::plan("omp", BASE, "omp-ollama-discovery", &[], &options(&state_dir)).unwrap();
+    let overlay = plan.overlay_home.as_ref().unwrap();
+    let models_text = std::fs::read_to_string(overlay.overlay_dir.join("models.yml")).unwrap();
+    let models: serde_yaml::Value = serde_yaml::from_str(&models_text).unwrap();
+
+    assert_eq!(models["providers"]["ollama"]["baseUrl"], format!("{BASE}/ollama/v1"));
+    assert_eq!(models["providers"]["ollama"]["discovery"]["type"], "ollama");
+    assert_eq!(models["providers"]["ollama"]["discovery"]["timeoutMs"], 5000);
 
     let _ = std::fs::remove_dir_all(agent_dir.parent().unwrap());
 }

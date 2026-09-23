@@ -59,8 +59,9 @@ async fn relay_with(upstream: SocketAddr, tweak: impl FnOnce(&mut Config)) -> (S
     let addr = listener.local_addr().unwrap();
     let cfg = Arc::new(cfg);
     let engine = Engine::new(cfg.clone());
+    let tracker = Arc::new(ashkelon::relay::Tracker::default());
     tokio::spawn(async move {
-        let _ = ashkelon::relay::serve(cfg, listener, engine).await;
+        let _ = ashkelon::relay::serve(cfg, listener, engine, tracker).await;
     });
     (addr, log_dir)
 }

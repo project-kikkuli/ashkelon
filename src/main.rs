@@ -71,7 +71,8 @@ async fn serve(cfg: Arc<ashkelon::config::Config>) -> anyhow::Result<()> {
 
     ashkelon::hooks::Engine::start(&engine);
 
-    ashkelon::relay::serve(cfg, listener, engine).await
+    let tracker = Arc::new(ashkelon::relay::Tracker::default());
+    ashkelon::relay::serve(cfg, listener, engine, tracker).await
 }
 
 async fn run(
@@ -94,8 +95,10 @@ async fn run(
 
     let relay_engine = engine.clone();
     let relay_cfg = cfg.clone();
+    let tracker = Arc::new(ashkelon::relay::Tracker::default());
+    let relay_tracker = tracker.clone();
     let relay_task = tokio::spawn(async move {
-        if let Err(e) = ashkelon::relay::serve(relay_cfg, listener, relay_engine).await {
+        if let Err(e) = ashkelon::relay::serve(relay_cfg, listener, relay_engine, relay_tracker).await {
             tracing::debug!("relay stopped: {e:#}");
         }
     });
@@ -159,6 +162,13 @@ async fn run(
         let _ = companion.start_kill();
         let _ = companion.wait().await;
     }
+    // The harness has already read everything it's going to read, but the relay's own
+    // response-forwarding tasks (streaming bodies, usage parsing, the call's telemetry write)
+    // run detached from what the harness consumed — see `Tracker`'s doc comment. Give them a
+    // bounded window to finish before the process exit below tears down every task
+    // unconditionally, or the last call or two of a run can vanish from the call log despite
+    // having answered correctly.
+    tracker.wait_idle(std::time::Duration::from_secs(5)).await;
     relay_task.abort();
 
     if let Some(overlay) = &plan.overlay_home {

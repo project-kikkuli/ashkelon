@@ -23,6 +23,7 @@ use crate::wire::Wire;
 use super::client::UpstreamClient;
 use super::decode::{decode_all, Encoding, StreamDecoder};
 use super::route;
+use super::tracker::Tracker;
 
 pub type ResponseBody = BoxBody<Bytes, Infallible>;
 
@@ -43,6 +44,7 @@ pub async fn handle(
     engine: Arc<Engine>,
     client: UpstreamClient,
     telemetry: Arc<Writer>,
+    tracker: Arc<Tracker>,
 ) -> Result<Response<ResponseBody>, Infallible> {
     let call_id = uuid::Uuid::new_v4().to_string();
     let method = req.method().clone();
@@ -189,8 +191,13 @@ pub async fn handle(
     let engine_bg = engine.clone();
     let telemetry_bg = telemetry.clone();
     let cfg_rules = cfg.clone();
+    // Held for the task's lifetime so a caller about to exit the process (`ashkelon run`) can
+    // drain in-flight forwarders first, instead of losing this call's telemetry to
+    // `std::process::exit` racing ahead of it — see `Tracker`'s doc comment.
+    let tracker_guard = tracker.track();
 
     tokio::spawn(async move {
+        let _tracker_guard = tracker_guard;
         forward_response(ForwardArgs {
             call_id,
             key,
