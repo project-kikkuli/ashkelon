@@ -18,6 +18,7 @@ http-body-util = "0.1"
 hyper = { version = "1", features = ["server", "client", "http1", "http2"] }
 hyper-rustls = { version = "0.27", default-features = false, features = ["http1", "http2", "ring", "webpki-roots", "rustls-native-certs"] }
 hyper-util = { version = "0.1", features = ["tokio", "server", "server-auto", "client", "client-legacy", "http1", "http2"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order", "arbitrary_precision"] }
@@ -38,3 +39,4 @@ tempfile = "3"
 flate2 = "1"
 zstd = "0.13"
 brotli = "6"
+tiny_http = "0.12"
