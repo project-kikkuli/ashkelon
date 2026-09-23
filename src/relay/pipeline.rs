@@ -175,7 +175,12 @@ pub async fn handle(
     let (resp_parts, incoming_body) = upstream_resp.into_parts();
     let status = resp_parts.status;
     let response_encoding = Encoding::from_header(header_str(&resp_parts.headers, "content-encoding"));
-    let client_headers = strip_hop_by_hop(&resp_parts.headers);
+    let mut client_headers = strip_hop_by_hop(&resp_parts.headers);
+    // A stream a rule may cut can end early, so it can't promise a length.
+    let cuttable = cfg.rules.max_response_chars.is_some() || !cfg.rules.cut_patterns.is_empty();
+    if cuttable && wire != Wire::Opaque {
+        client_headers.remove(http::header::CONTENT_LENGTH);
+    }
 
     let (tx, rx) = mpsc::channel::<Result<Frame<Bytes>, Infallible>>(8);
 
@@ -279,17 +284,18 @@ async fn forward_response(args: ForwardArgs) {
             }
         }
 
-        let raw = data.clone();
-        if args.tx.send(Ok(Frame::data(raw))).await.is_err() {
-            error.get_or_insert_with(|| "client disconnected".to_string());
-            break;
-        }
-
+        // The chunk that tripped a rule is withheld, so the agent never sees the offending output.
         if let Some(rule) = &cut_rule {
-            let tail = rules::cut_tail(args.wire, rule);
+            // A plaintext tail can't follow compressed bytes; a compressed stream just ends.
+            let tail = if args.response_encoding.is_identity() { rules::cut_tail(args.wire, rule) } else { Vec::new() };
             if !tail.is_empty() {
                 let _ = args.tx.send(Ok(Frame::data(Bytes::from(tail)))).await;
             }
+            break;
+        }
+
+        if args.tx.send(Ok(Frame::data(data.clone()))).await.is_err() {
+            error.get_or_insert_with(|| "client disconnected".to_string());
             break;
         }
     }
