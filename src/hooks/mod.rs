@@ -357,7 +357,7 @@ impl Engine {
 
     async fn append_hook_log(&self, hook: &str, event: HookEvent, session: &str, status: &str, duration_ms: u64) {
         let dir = self.cfg.log_dir();
-        if let Err(e) = tokio::fs::create_dir_all(&dir).await {
+        if let Err(e) = crate::fsperm::create_dir_private_async(&dir).await {
             tracing::warn!(error = %e, "failed to create hook log dir");
             return;
         }
@@ -380,6 +380,10 @@ impl Engine {
             .await
         {
             Ok(mut f) => {
+                // Narrowed before any content is appended, not after.
+                if let Err(e) = crate::fsperm::set_private_file_async(&path).await {
+                    tracing::warn!(error = %e, "failed to set hook log permissions");
+                }
                 if let Err(e) = f.write_all(line.as_bytes()).await {
                     tracing::warn!(error = %e, "failed to write hook log line");
                 }
@@ -487,24 +491,12 @@ fn session_hash(key: &SessionKey) -> String {
 }
 
 async fn persist_file(dir: &Path, name: &str, bytes: &[u8]) {
-    if let Err(e) = tokio::fs::create_dir_all(dir).await {
+    if let Err(e) = crate::fsperm::create_dir_private_async(dir).await {
         tracing::warn!(error = %e, "failed to create session state dir");
         return;
     }
-    #[cfg(unix)]
-    set_mode(dir, 0o700).await;
-
     let path = dir.join(name);
-    if let Err(e) = tokio::fs::write(&path, bytes).await {
+    if let Err(e) = crate::fsperm::write_private_file_async(&path, bytes).await {
         tracing::warn!(error = %e, "failed to write session state file");
-        return;
     }
-    #[cfg(unix)]
-    set_mode(&path, 0o600).await;
-}
-
-#[cfg(unix)]
-async fn set_mode(path: &Path, mode: u32) {
-    use std::os::unix::fs::PermissionsExt;
-    let _ = tokio::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).await;
 }

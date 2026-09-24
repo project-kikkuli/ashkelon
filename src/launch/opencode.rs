@@ -28,7 +28,7 @@ pub fn plan(relay_base: &str, launch: &str, args: &[String], _options: &LaunchOp
         }
     });
     let config_path = std::env::temp_dir().join(format!("ashkelon-{launch}-opencode-config.json"));
-    std::fs::write(&config_path, serde_json::to_vec_pretty(&config)?)?;
+    crate::fsperm::write_private_file(&config_path, &serde_json::to_vec_pretty(&config)?)?;
     plan.temp_files.push(config_path.clone());
 
     let port = free_local_port().context("picking a free local port for opencode serve")?;

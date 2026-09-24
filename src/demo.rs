@@ -261,8 +261,8 @@ pub async fn run() -> anyhow::Result<()> {
     let scratch = std::env::temp_dir().join(format!("ashkelon-demo-{}", std::process::id()));
     let log_dir = scratch.join("logs");
     let state_dir = scratch.join("state");
-    std::fs::create_dir_all(&log_dir)?;
-    std::fs::create_dir_all(&state_dir)?;
+    crate::fsperm::create_dir_private(&log_dir)?;
+    crate::fsperm::create_dir_private(&state_dir)?;
     let hook_path = scratch.join("demo-hook.sh");
     write_hook_script(&hook_path);
 

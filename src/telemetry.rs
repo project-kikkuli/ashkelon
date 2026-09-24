@@ -1,4 +1,4 @@
-use std::fs::{self, OpenOptions};
+use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
+use crate::fsperm::{create_dir_private, set_private_file};
 use crate::session::SessionKey;
 use crate::usage::Usage;
 use crate::wire::Wire;
@@ -77,6 +78,17 @@ impl Writer {
         })
     }
 
+    /// Builds a writer without requiring its log directory to exist yet. Telemetry is ashkelon's
+    /// own optional work: a log directory ashkelon can't create must never stop the relay from
+    /// starting and forwarding calls. Every write still tries (and still fails open on its own,
+    /// logging a warning) independently of this constructor.
+    pub fn degraded(log_dir: impl Into<PathBuf>) -> Writer {
+        Writer {
+            log_dir: log_dir.into(),
+            lock: Mutex::new(()),
+        }
+    }
+
     pub fn write(&self, record: &CallRecord) -> std::io::Result<()> {
         let line =
             serde_json::to_string(record).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
@@ -109,33 +121,10 @@ impl Writer {
     }
 }
 
-#[cfg(unix)]
-fn create_dir_private(dir: &std::path::Path) -> std::io::Result<()> {
-    use std::os::unix::fs::DirBuilderExt;
-    if dir.exists() {
-        return Ok(());
-    }
-    fs::DirBuilder::new().recursive(true).mode(0o700).create(dir)
-}
-
-#[cfg(not(unix))]
-fn create_dir_private(dir: &std::path::Path) -> std::io::Result<()> {
-    fs::create_dir_all(dir)
-}
-
-#[cfg(unix)]
-fn set_private_file(file: &std::fs::File) -> std::io::Result<()> {
-    use std::os::unix::fs::PermissionsExt;
-    file.set_permissions(std::fs::Permissions::from_mode(0o600))
-}
-
-#[cfg(not(unix))]
-fn set_private_file(_file: &std::fs::File) -> std::io::Result<()> {
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
     use super::*;
     use crate::wire::Wire;
 

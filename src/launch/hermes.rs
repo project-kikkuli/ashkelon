@@ -66,7 +66,7 @@ pub fn plan(relay_base: &str, launch: &str, args: &[String], options: &LaunchOpt
 
     build_home_overlay(&real_home, &overlay_dir, CONFIG_FILE).context("building the Hermes home overlay")?;
     let config_path = overlay_dir.join(CONFIG_FILE);
-    std::fs::write(&config_path, serde_yaml::to_string(&overlaid_config)?)
+    crate::fsperm::write_private_file(&config_path, serde_yaml::to_string(&overlaid_config)?.as_bytes())
         .context("writing the overlaid Hermes config.yaml")?;
 
     let mut plan = LaunchPlan::new("hermes", "hermes");

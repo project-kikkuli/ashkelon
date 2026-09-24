@@ -37,7 +37,7 @@ pub fn plan(relay_base: &str, launch: &str, args: &[String], options: &LaunchOpt
 
     let exe = std::env::current_exe().context("locating ashkelon's own executable path for --mcp-config")?;
     let socket_dir = options.state_dir.join("launch");
-    std::fs::create_dir_all(&socket_dir).context("creating the channel socket directory")?;
+    crate::fsperm::create_dir_private(&socket_dir).context("creating the channel socket directory")?;
     let socket_path = socket_dir.join(format!("{launch}.sock"));
 
     let mcp_config = serde_json::json!({

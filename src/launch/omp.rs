@@ -65,7 +65,7 @@ pub fn plan(relay_base: &str, launch: &str, args: &[String], options: &LaunchOpt
 
     build_home_overlay(&real_agent_dir, &overlay_dir, MODELS_FILE).context("building the omp agent-dir overlay")?;
     let models_path = overlay_dir.join(MODELS_FILE);
-    std::fs::write(&models_path, serde_yaml::to_string(&overlaid_models)?)
+    crate::fsperm::write_private_file(&models_path, serde_yaml::to_string(&overlaid_models)?.as_bytes())
         .context("writing the overlaid omp models.yml")?;
 
     let mut plan = LaunchPlan::new("omp", "omp");

@@ -135,8 +135,8 @@ pub fn plan(
 /// that one itself, as a real modified file — never a symlink to the user's original). Creates
 /// both directories if missing, so a harness that has never run yet still gets a usable overlay.
 pub fn build_home_overlay(real_home: &Path, overlay_dir: &Path, skip_name: &str) -> anyhow::Result<()> {
-    std::fs::create_dir_all(real_home)?;
-    std::fs::create_dir_all(overlay_dir)?;
+    crate::fsperm::create_dir_private(real_home)?;
+    crate::fsperm::create_dir_private(overlay_dir)?;
     for entry in std::fs::read_dir(real_home)? {
         let entry = entry?;
         let name = entry.file_name();

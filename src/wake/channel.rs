@@ -21,7 +21,7 @@ pub async fn run(socket_path: &Path) -> anyhow::Result<()> {
         std::fs::remove_file(socket_path)?;
     }
     if let Some(parent) = socket_path.parent() {
-        std::fs::create_dir_all(parent)?;
+        crate::fsperm::create_dir_private(parent)?;
     }
     let listener = UnixListener::bind(socket_path)?;
     std::fs::set_permissions(socket_path, std::fs::Permissions::from_mode(0o600))?;
