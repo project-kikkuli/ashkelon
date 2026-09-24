@@ -17,11 +17,16 @@ use crate::telemetry::Writer;
 
 pub use tracker::Tracker;
 
-/// Serves the relay on `listener` until it errors (the listener is closed) or a fatal setup error
-/// occurs. Each connection is handled independently; a panic or error on one never takes down
-/// another in-flight call. `tracker` counts the response-forwarding tasks `pipeline::handle`
-/// spawns per request, so a caller about to exit the process (`ashkelon run`) can drain them
-/// first — see [`Tracker`]'s doc comment for why that matters.
+#[cfg(feature = "test-util")]
+pub use pipeline::test_hooks;
+
+/// Serves the relay on `listener` until a fatal setup error occurs (there is no upstream client to
+/// relay through). Each connection is handled independently; a panic or error on one never takes
+/// down another in-flight call, and a transient `accept()` failure never ends the loop either —
+/// this is the one task standing between the agent and its model, so it keeps running rather than
+/// handing a setup or accept hiccup back to its caller as a reason to give up. `tracker` counts the
+/// response-forwarding tasks `pipeline::handle` spawns per request, so a caller about to exit the
+/// process (`ashkelon run`) can drain them first — see [`Tracker`]'s doc comment for why that matters.
 pub async fn serve(
     cfg: Arc<Config>,
     listener: TcpListener,
@@ -29,10 +34,20 @@ pub async fn serve(
     tracker: Arc<Tracker>,
 ) -> anyhow::Result<()> {
     let client = client::build()?;
-    let telemetry = Arc::new(Writer::new(cfg.log_dir())?);
+    let telemetry = Arc::new(Writer::new(cfg.log_dir()).unwrap_or_else(|e| {
+        tracing::error!(error = %e, "failed to set up the call log directory; relaying continues without it");
+        Writer::degraded(cfg.log_dir())
+    }));
 
     loop {
-        let (stream, _addr) = listener.accept().await?;
+        let (stream, _addr) = match listener.accept().await {
+            Ok(pair) => pair,
+            Err(err) => {
+                tracing::error!(error = %err, "ashkelon: accept() failed; retrying instead of stopping the relay");
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                continue;
+            }
+        };
         let io = TokioIo::new(stream);
         let cfg = cfg.clone();
         let engine = engine.clone();

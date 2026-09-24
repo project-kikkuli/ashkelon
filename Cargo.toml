@@ -36,7 +36,13 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uuid = { version = "1", features = ["v4"] }
 
+[features]
+# Fault-injection switches used only by integration tests to prove the relay fails open when its
+# own optional work (transforms, parsing, ...) panics. Never enabled in a normal build.
+test-util = []
+
 [dev-dependencies]
+ashkelon = { path = ".", features = ["test-util"] }
 tempfile = "3"
 flate2 = "1"
 zstd = "0.13"

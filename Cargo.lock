@@ -99,6 +99,7 @@ name = "ashkelon"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "ashkelon",
  "async-compression",
  "base64",
  "brotli 6.0.0",

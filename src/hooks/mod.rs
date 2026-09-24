@@ -128,7 +128,7 @@ impl Engine {
     pub fn register_launch(&self, launch: &str, target: WakeTarget, cwd: PathBuf) {
         self.launches
             .lock()
-            .unwrap()
+            .unwrap_or_else(|e| e.into_inner())
             .insert(launch.to_string(), LaunchInfo { target, cwd });
     }
 
@@ -173,13 +173,13 @@ impl Engine {
     /// The synchronous half of `observe_request`: updates session state and decides which
     /// events fired, without doing any I/O or process spawning itself.
     fn record_request(&self, key: &SessionKey, wire: Wire, body: &[u8]) -> Vec<HookTrigger> {
-        let mut sessions = self.sessions.lock().unwrap();
+        let mut sessions = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
         let is_new = !sessions.contains_key(key);
         if is_new {
             let launch_info = key.launch.as_deref().and_then(|id| {
                 self.launches
                     .lock()
-                    .unwrap()
+                    .unwrap_or_else(|e| e.into_inner())
                     .get(id)
                     .map(|i| (i.cwd.clone(), i.target.clone()))
             });
@@ -225,7 +225,7 @@ impl Engine {
     }
 
     fn record_response(&self, key: &SessionKey, summary: &Summary) -> Vec<HookTrigger> {
-        let mut sessions = self.sessions.lock().unwrap();
+        let mut sessions = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
         let Some(state) = sessions.get_mut(key) else {
             // A response with no matching request-derived session is nothing this engine can
             // attribute background work to; drop it rather than inventing state for it.
@@ -248,7 +248,7 @@ impl Engine {
     /// own background task so unrelated hooks never wait on one another.
     async fn dispatch(&self, key: &SessionKey, trigger: HookTrigger) {
         let cwd = {
-            let sessions = self.sessions.lock().unwrap();
+            let sessions = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
             sessions.get(key).and_then(|s| s.cwd.clone())
         };
         for hook in &self.cfg.hooks {
@@ -274,7 +274,7 @@ impl Engine {
         // we own the slot, later loop iterations (running the queued rerun) must not re-check
         // it, or they would mistake their own ownership for someone else's and queue forever.
         {
-            let mut sessions = self.sessions.lock().unwrap();
+            let mut sessions = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
             let Some(state) = sessions.get_mut(&key) else { return };
             let run = state.hook_runs.entry(hook.name.clone()).or_default();
             if run.running {
@@ -286,7 +286,7 @@ impl Engine {
 
         loop {
             let cwd = {
-                let sessions = self.sessions.lock().unwrap();
+                let sessions = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
                 sessions.get(&key).and_then(|s| s.cwd.clone())
             };
             let dir = self.session_dir(&key);
@@ -294,7 +294,7 @@ impl Engine {
             self.apply_outcome(&key, &hook, trigger.event, result).await;
 
             let next = {
-                let mut sessions = self.sessions.lock().unwrap();
+                let mut sessions = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
                 match sessions.get_mut(&key) {
                     Some(state) => {
                         let run = state.hook_runs.entry(hook.name.clone()).or_default();
@@ -328,14 +328,14 @@ impl Engine {
 
         match result.outcome {
             Outcome::Pass => {
-                let mut sessions = self.sessions.lock().unwrap();
+                let mut sessions = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
                 if let Some(state) = sessions.get_mut(key) {
                     state.outbox.retain(|p| p.hook != hook.name);
                 }
             }
             Outcome::Fail { message, fix } => {
                 let candidate = Ping::new(&hook.name, &message, fix.as_deref());
-                let mut sessions = self.sessions.lock().unwrap();
+                let mut sessions = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
                 if let Some(state) = sessions.get_mut(key) {
                     let duplicate = state.outbox.iter().any(|p| p.id == candidate.id)
                         || state.delivered.iter().any(|p| p.id == candidate.id);
@@ -395,7 +395,7 @@ impl Engine {
     /// Returns the request body with pending and previously delivered pings inserted, plus the
     /// ids newly delivered.
     pub fn attach_pings(&self, key: &SessionKey, wire: Wire, body: &[u8]) -> Option<(Vec<u8>, Vec<String>)> {
-        let mut sessions = self.sessions.lock().unwrap();
+        let mut sessions = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
         let state = sessions.get_mut(key)?;
         if state.outbox.is_empty() && state.delivered.is_empty() {
             return None;
@@ -442,7 +442,7 @@ impl Engine {
         let now = Instant::now();
 
         let candidates: Vec<(SessionKey, WakeTarget, String)> = {
-            let sessions = self.sessions.lock().unwrap();
+            let sessions = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
             sessions
                 .iter()
                 .filter_map(|(key, state)| {
@@ -466,7 +466,7 @@ impl Engine {
 
         for (key, target, text) in candidates {
             if let Ok(true) = (self.waker)(target, key.clone(), text).await {
-                let mut sessions = self.sessions.lock().unwrap();
+                let mut sessions = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
                 if let Some(state) = sessions.get_mut(&key) {
                     // The harness will carry this as a real user turn, so it needs no anchor:
                     // mark delivered without pinning.

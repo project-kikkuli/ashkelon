@@ -27,6 +27,54 @@ use super::tracker::Tracker;
 
 pub type ResponseBody = BoxBody<Bytes, Infallible>;
 
+/// Fault-injection switches for integration tests to prove specific steps of ashkelon's own
+/// optional work fail open when they panic. Only compiled with `test-util`, which is enabled
+/// solely as a dev-dependency feature (see `Cargo.toml`) — never part of a normal build.
+#[cfg(feature = "test-util")]
+pub mod test_hooks {
+    use std::sync::atomic::AtomicBool;
+
+    pub static PANIC_IN_TRANSFORM: AtomicBool = AtomicBool::new(false);
+    pub static PANIC_IN_PARSER: AtomicBool = AtomicBool::new(false);
+}
+
+#[cfg(feature = "test-util")]
+fn injected_panic(flag: &std::sync::atomic::AtomicBool, what: &str) {
+    if flag.swap(false, std::sync::atomic::Ordering::SeqCst) {
+        panic!("test-util: injected {what} panic");
+    }
+}
+
+/// Runs `f`, ashkelon's own optional work (a transform, a rule check, hook-engine bookkeeping, a
+/// response parser). A panic there must never cost the agent its model access: it's caught,
+/// logged, and treated as "this step did nothing" so the call is still relayed unmodified.
+fn fail_open<F, T>(component: &'static str, f: F) -> Option<T>
+where
+    F: FnOnce() -> T,
+{
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)) {
+        Ok(value) => Some(value),
+        Err(payload) => {
+            tracing::error!(
+                component,
+                panic = %panic_message(&payload),
+                "ashkelon: {component} panicked; failing open and relaying this call unmodified"
+            );
+            None
+        }
+    }
+}
+
+fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
+    if let Some(s) = payload.downcast_ref::<&str>() {
+        (*s).to_string()
+    } else if let Some(s) = payload.downcast_ref::<String>() {
+        s.clone()
+    } else {
+        "non-string panic payload".to_string()
+    }
+}
+
 const HOP_BY_HOP: &[&str] = &[
     "connection",
     "keep-alive",
@@ -68,13 +116,32 @@ pub async fn handle(
     let decoded_request = decode_all(request_encoding, &raw_request).await;
 
     let key = session::derive(parsed.launch.as_deref(), wire, &in_headers, &decoded_request);
-    engine.observe_request(&key, wire, &decoded_request);
+    {
+        let engine = &engine;
+        let key = &key;
+        let decoded_request = &decoded_request;
+        fail_open("hook engine (observe_request)", move || {
+            engine.observe_request(key, wire, decoded_request)
+        });
+    }
 
-    let applied = transform::apply(wire, &cfg.transforms, &decoded_request);
+    let applied = fail_open("transform::apply", || {
+        #[cfg(feature = "test-util")]
+        injected_panic(&test_hooks::PANIC_IN_TRANSFORM, "transform");
+        transform::apply(wire, &cfg.transforms, &decoded_request)
+    })
+    .unwrap_or_else(|| transform::Applied {
+        body: decoded_request.clone(),
+        changed: Vec::new(),
+    });
     let transform_names = applied.changed;
     let mut current_body = applied.body;
 
-    if let PreDecision::Reject { rule, message } = rules::check_request(wire, &cfg.rules, &current_body) {
+    let decision = fail_open("rules::check_request", || {
+        rules::check_request(wire, &cfg.rules, &current_body)
+    })
+    .unwrap_or(PreDecision::Allow);
+    if let PreDecision::Reject { rule, message } = decision {
         let (status, resp_body) = rules::reject_response(wire, &rule, &message);
         let record = CallRecord {
             ts: now_ts(),
@@ -108,7 +175,15 @@ pub async fn handle(
     }
 
     let mut pings_injected = Vec::new();
-    if let Some((body, ids)) = engine.attach_pings(&key, wire, &current_body) {
+    let attached = {
+        let engine = &engine;
+        let key = &key;
+        let current_body = &current_body;
+        fail_open("hook engine (attach_pings)", move || {
+            engine.attach_pings(key, wire, current_body)
+        })
+    };
+    if let Some(Some((body, ids))) = attached {
         current_body = body;
         pings_injected = ids;
     }
@@ -286,12 +361,30 @@ async fn forward_response(args: ForwardArgs) {
             buf.extend_from_slice(data);
         }
 
+        let mut monitoring_panicked = false;
         if let (Some(parser_ref), Some(dec)) = (parser.as_deref_mut(), decoder.as_mut()) {
             let decoded = dec.push(data).await;
-            parser_ref.feed(&decoded);
-            if let Some(rule) = guard.check(parser_ref) {
-                cut_rule = Some(rule);
+            let outcome = fail_open("response parser", || {
+                #[cfg(feature = "test-util")]
+                injected_panic(&test_hooks::PANIC_IN_PARSER, "parser");
+                parser_ref.feed(&decoded);
+                guard.check(parser_ref)
+            });
+            match outcome {
+                Some(Some(rule)) => cut_rule = Some(rule),
+                Some(None) => {}
+                None => monitoring_panicked = true,
             }
+        }
+        // The raw bytes below are forwarded regardless of what just happened above: a parser or
+        // guard panic only ever costs ashkelon its own observation of this stream, never the
+        // agent's copy of it.
+        if monitoring_panicked {
+            parser = None;
+            decoder = None;
+            error.get_or_insert_with(|| {
+                "response parser panicked; usage/rule monitoring disabled for the rest of this call".to_string()
+            });
         }
 
         // The chunk that tripped a rule is withheld, so the agent never sees the offending output.
@@ -319,16 +412,27 @@ async fn forward_response(args: ForwardArgs) {
     if let Some(dec) = decoder.as_mut() {
         if let Some(parser_ref) = parser.as_deref_mut() {
             let tail = dec.finish().await;
-            parser_ref.feed(&tail);
+            if fail_open("response parser (finish)", || parser_ref.feed(&tail)).is_none() {
+                error.get_or_insert_with(|| "response parser panicked while finishing".to_string());
+            }
         }
     }
 
-    let summary = parser.map(|p| p.finish());
+    let had_parser = parser.is_some();
+    let summary = parser.and_then(|p| fail_open("response parser (summary)", move || p.finish()));
+    if had_parser && summary.is_none() && error.is_none() {
+        error = Some("response parser panicked while building the call summary".to_string());
+    }
     let total_ms = args.t0.elapsed().as_millis() as u64;
     let ttfb_ms = first_byte_at.map(|t| t.duration_since(args.t0).as_millis() as u64);
 
     if let Some(s) = summary.as_ref() {
-        args.engine.observe_response(&args.key, args.wire, s);
+        let engine = &args.engine;
+        let key = &args.key;
+        let wire = args.wire;
+        fail_open("hook engine (observe_response)", move || {
+            engine.observe_response(key, wire, s)
+        });
     }
 
     let (model, stop_reason, usage, tool_calls, turn_end, parser_error) = match summary {
@@ -403,14 +507,18 @@ fn host_header_value(uri: &http::Uri) -> Option<HeaderValue> {
 }
 
 fn log_record(telemetry: &Writer, record: &CallRecord) {
-    if let Err(err) = telemetry.write(record) {
-        tracing::warn!(error = %err, "failed to write call record");
+    match fail_open("telemetry write", || telemetry.write(record)) {
+        Some(Ok(())) => {}
+        Some(Err(err)) => tracing::warn!(error = %err, "failed to write call record"),
+        None => {}
     }
 }
 
 fn log_body(telemetry: &Writer, call_id: &str, kind: BodyKind, bytes: &[u8]) {
-    if let Err(err) = telemetry.write_body(call_id, kind, bytes) {
-        tracing::warn!(error = %err, "failed to write call body");
+    match fail_open("telemetry write_body", || telemetry.write_body(call_id, kind, bytes)) {
+        Some(Ok(())) => {}
+        Some(Err(err)) => tracing::warn!(error = %err, "failed to write call body"),
+        None => {}
     }
 }
 

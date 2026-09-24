@@ -18,7 +18,7 @@ fn warn_once(key: &str) -> bool {
     WARNED
         .get_or_init(|| Mutex::new(HashSet::new()))
         .lock()
-        .unwrap()
+        .unwrap_or_else(|e| e.into_inner())
         .insert(key.to_string())
 }
 
