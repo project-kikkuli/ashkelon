@@ -72,7 +72,7 @@ async fn main() -> anyhow::Result<()> {
 }
 
 async fn serve(cfg: Arc<ashkelon::config::Config>) -> anyhow::Result<()> {
-    let addr = cfg.listen.clone().unwrap_or_else(|| "127.0.0.1:8484".to_string());
+    let addr = cfg.listen_addr()?;
     let listener = tokio::net::TcpListener::bind(&addr)
         .await
         .with_context(|| format!("binding {addr}"))?;

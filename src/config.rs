@@ -159,6 +159,38 @@ impl Config {
     pub fn state_dir(&self) -> PathBuf {
         self.state_dir.clone().unwrap_or_else(state_home)
     }
+
+    /// The address to bind, defaulting to `127.0.0.1:8484`. Refuses anything but loopback: the
+    /// relay forwards callers' own auth headers to real providers, so a reachable-from-the-network
+    /// bind would turn it into an open proxy for whoever can reach that address.
+    pub fn listen_addr(&self) -> anyhow::Result<String> {
+        let addr = self.listen.clone().unwrap_or_else(|| "127.0.0.1:8484".to_string());
+        validate_loopback_listen_addr(&addr)?;
+        Ok(addr)
+    }
+}
+
+fn validate_loopback_listen_addr(addr: &str) -> anyhow::Result<()> {
+    if is_loopback_addr(addr) {
+        return Ok(());
+    }
+    anyhow::bail!(
+        "listen = \"{addr}\" is not a loopback address. ashkelon forwards callers' own auth \
+         headers straight to the real provider, so binding anything reachable from the network \
+         turns it into an open proxy. Use a 127.0.0.0/8 address, ::1, or localhost."
+    )
+}
+
+fn is_loopback_addr(addr: &str) -> bool {
+    if let Ok(sock) = addr.parse::<std::net::SocketAddr>() {
+        return sock.ip().is_loopback();
+    }
+    let host = addr.rsplit_once(':').map_or(addr, |(host, _)| host);
+    let host = host.trim_start_matches('[').trim_end_matches(']');
+    if host.eq_ignore_ascii_case("localhost") {
+        return true;
+    }
+    host.parse::<std::net::IpAddr>().is_ok_and(|ip| ip.is_loopback())
 }
 
 fn state_home() -> PathBuf {
@@ -166,4 +198,52 @@ fn state_home() -> PathBuf {
         .or_else(dirs::data_local_dir)
         .unwrap_or_else(|| PathBuf::from("."))
         .join("ashkelon")
+}
+
+#[cfg(test)]
+mod listen_addr_tests {
+    use super::*;
+
+    #[test]
+    fn accepts_loopback_forms() {
+        assert!(is_loopback_addr("127.0.0.1:8484"));
+        assert!(is_loopback_addr("127.5.6.7:1"));
+        assert!(is_loopback_addr("[::1]:8484"));
+        assert!(is_loopback_addr("localhost:8484"));
+        assert!(is_loopback_addr("LOCALHOST:8484"));
+    }
+
+    #[test]
+    fn rejects_non_loopback_forms() {
+        assert!(!is_loopback_addr("0.0.0.0:8484"));
+        assert!(!is_loopback_addr("[::]:8484"));
+        assert!(!is_loopback_addr("192.168.1.5:8484"));
+        assert!(!is_loopback_addr("example.com:8484"));
+        assert!(!is_loopback_addr("10.0.0.1:8484"));
+    }
+
+    #[test]
+    fn config_listen_addr_defaults_to_loopback() {
+        let cfg = Config::default();
+        assert_eq!(cfg.listen_addr().unwrap(), "127.0.0.1:8484");
+    }
+
+    #[test]
+    fn config_listen_addr_rejects_configured_non_loopback() {
+        let cfg = Config {
+            listen: Some("0.0.0.0:8484".to_string()),
+            ..Config::default()
+        };
+        let err = cfg.listen_addr().unwrap_err();
+        assert!(err.to_string().contains("not a loopback address"));
+    }
+
+    #[test]
+    fn config_listen_addr_accepts_configured_loopback() {
+        let cfg = Config {
+            listen: Some("127.0.0.1:9999".to_string()),
+            ..Config::default()
+        };
+        assert_eq!(cfg.listen_addr().unwrap(), "127.0.0.1:9999");
+    }
 }
