@@ -29,16 +29,47 @@ async fn post(addr: std::net::SocketAddr, path: &str, body: &str) -> (StatusCode
 async fn valid_registration_is_accepted() {
     let upstream =
         spawn_fake_upstream(|_req| async move { Response::builder().status(200).body(full_body("{}")).unwrap() }).await;
+    let (addr, log_dir, _engine) = spawn_relay_with_engine(upstream, false).await;
+
+    let socket = log_dir.path().join("state").join("channel").join("sess-1.sock");
+    let (status, body) = post(
+        addr,
+        "/internal/claude-channel",
+        &format!(r#"{{"session_id":"sess-1","socket":"{}"}}"#, socket.display()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body, r#"{"ok":true}"#);
+}
+
+#[tokio::test]
+async fn registration_outside_the_state_dir_is_rejected() {
+    let upstream =
+        spawn_fake_upstream(|_req| async move { Response::builder().status(200).body(full_body("{}")).unwrap() }).await;
     let (addr, _log_dir, _engine) = spawn_relay_with_engine(upstream, false).await;
 
-    let (status, body) = post(
+    let (status, _body) = post(
         addr,
         "/internal/claude-channel",
         r#"{"session_id":"sess-1","socket":"/tmp/sess-1.sock"}"#,
     )
     .await;
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(body, r#"{"ok":true}"#);
+    assert_eq!(status, StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn registration_with_a_relative_socket_path_is_rejected() {
+    let upstream =
+        spawn_fake_upstream(|_req| async move { Response::builder().status(200).body(full_body("{}")).unwrap() }).await;
+    let (addr, _log_dir, _engine) = spawn_relay_with_engine(upstream, false).await;
+
+    let (status, _body) = post(
+        addr,
+        "/internal/claude-channel",
+        r#"{"session_id":"sess-1","socket":"sess-1.sock"}"#,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
 }
 
 #[tokio::test]

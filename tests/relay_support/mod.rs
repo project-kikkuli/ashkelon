@@ -75,6 +75,7 @@ pub async fn spawn_relay_with_engine(
     let log_dir = tempfile::tempdir().expect("tempdir");
     let mut cfg = Config {
         log_dir: Some(log_dir.path().to_path_buf()),
+        state_dir: Some(log_dir.path().join("state")),
         log_bodies,
         ..Config::default()
     };

@@ -1,3 +1,4 @@
+mod channel_trust;
 mod client;
 mod decode;
 mod pipeline;

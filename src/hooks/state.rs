@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::time::Instant;
 
@@ -30,6 +30,10 @@ pub struct SessionState {
     pub outbox: Vec<Ping>,
     /// Pings already pinned into a request, re-inserted at the same anchor on every later one.
     pub delivered: Vec<PinnedPing>,
+    /// Every ping id ever delivered by any path (pinned into a request or woken), for lifetime
+    /// dedup: an identical failure (same hook + message, hence same `Ping::id`) is pinged at
+    /// most once per session, whether delivery happens through injection or through a wake.
+    pub delivered_ids: HashSet<String>,
     /// Total pings ever delivered (pinned or woken), for `pings.max_per_session`.
     pub delivered_count: u32,
     pub hook_runs: HashMap<String, HookRun>,
@@ -47,6 +51,7 @@ impl SessionState {
             wake_target,
             outbox: Vec::new(),
             delivered: Vec::new(),
+            delivered_ids: HashSet::new(),
             delivered_count: 0,
             hook_runs: HashMap::new(),
         }

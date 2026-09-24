@@ -20,6 +20,7 @@ use crate::transform;
 use crate::usage::{self, Usage};
 use crate::wire::Wire;
 
+use super::channel_trust;
 use super::client::UpstreamClient;
 use super::decode::{decode_all, Encoding, StreamDecoder};
 use super::route;
@@ -78,8 +79,8 @@ fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
 /// Where a serve-mode `ashkelon channel` process registers its control socket against the Claude
 /// Code session id it was spawned with (see `hooks::Engine::register_claude_channel`). Never
 /// collides with a provider route: every real route name is a bare path segment
-/// (`route::resolve` looks up the first segment against `builtin_upstream`/`cfg.routes`), and none
-/// of them is named `internal`.
+/// (`route::resolve` looks up the first segment against `builtin_upstream`/`cfg.routes`), and
+/// `Config::load` rejects a configured route named `internal` so one can't be added later either.
 const CHANNEL_REGISTER_PATH: &str = "/internal/claude-channel";
 
 const HOP_BY_HOP: &[&str] = &[
@@ -109,7 +110,7 @@ pub async fn handle(
     let in_headers = req.headers().clone();
 
     if path == CHANNEL_REGISTER_PATH && method == hyper::Method::POST {
-        return Ok(handle_channel_register(req, &engine).await);
+        return Ok(handle_channel_register(req, &engine, &cfg).await);
     }
 
     let Some(parsed) = route::resolve(&path, &cfg) else {
@@ -540,23 +541,38 @@ struct ChannelRegistration {
 }
 
 /// Body of a POST to [`CHANNEL_REGISTER_PATH`]: `{"session_id": "...", "socket": "/path/to.sock"}`.
-/// Loopback-only (the relay itself only ever binds `127.0.0.1`/local addresses), so this is trusted
-/// the same as any other local caller of the relay.
-async fn handle_channel_register(req: Request<Incoming>, engine: &Engine) -> Response<ResponseBody> {
+/// Loopback-only (the relay itself only ever binds `127.0.0.1`/local addresses), so any local
+/// process can reach it — including one that is not `ashkelon channel`. Without a further check
+/// it would happily point a live wake at whatever unix socket path that process names, letting it
+/// impersonate a Claude Code channel or read pings meant for one. `trusted_channel_socket` closes
+/// that: the registered path must resolve inside ashkelon's own state dir and be owned by
+/// whichever user this daemon runs as, which only `ashkelon channel` itself (or install, which
+/// also runs as this user) can arrange.
+async fn handle_channel_register(req: Request<Incoming>, engine: &Engine, cfg: &Config) -> Response<ResponseBody> {
     let body = match req.into_body().collect().await {
         Ok(collected) => collected.to_bytes(),
         Err(err) => return bad_gateway(&format!("reading registration body: {err}")),
     };
-    match serde_json::from_slice::<ChannelRegistration>(&body) {
-        Ok(reg) => {
-            engine.register_claude_channel(&reg.session_id, std::path::PathBuf::from(reg.socket));
-            json_response(StatusCode::OK, b"{\"ok\":true}".to_vec())
+    let reg = match serde_json::from_slice::<ChannelRegistration>(&body) {
+        Ok(reg) => reg,
+        Err(err) => {
+            return json_response(
+                StatusCode::BAD_REQUEST,
+                serde_json::json!({"error": err.to_string()}).to_string().into_bytes(),
+            )
         }
-        Err(err) => json_response(
-            StatusCode::BAD_REQUEST,
-            serde_json::json!({"error": err.to_string()}).to_string().into_bytes(),
-        ),
+    };
+    let socket = std::path::PathBuf::from(&reg.socket);
+    let state_dir = cfg.state_dir();
+    if let Err(reason) = channel_trust::trusted_channel_socket(&state_dir, &socket) {
+        tracing::warn!(socket = %reg.socket, reason = %reason, "rejecting untrusted claude-channel registration");
+        return json_response(
+            StatusCode::FORBIDDEN,
+            serde_json::json!({"error": reason}).to_string().into_bytes(),
+        );
     }
+    engine.register_claude_channel(&reg.session_id, socket);
+    json_response(StatusCode::OK, b"{\"ok\":true}".to_vec())
 }
 
 fn not_found() -> Response<ResponseBody> {

@@ -2,6 +2,12 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+/// First path segment reserved for ashkelon's own endpoints outside the route table (currently
+/// only `relay::pipeline`'s `/internal/claude-channel`). A configured route of this name would
+/// otherwise sit in the same lookup table `route::resolve` checks and could shadow or collide
+/// with it.
+const RESERVED_ROUTE_NAME: &str = "internal";
+
 /// `~/.config/ashkelon/config.toml`. Every section is optional.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -145,11 +151,24 @@ impl Config {
 
     pub fn load(path: Option<&std::path::Path>) -> anyhow::Result<Config> {
         let path = path.map(PathBuf::from).unwrap_or_else(Config::default_path);
-        match std::fs::read_to_string(&path) {
-            Ok(text) => Ok(toml::from_str(&text)?),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Config::default()),
-            Err(e) => Err(e.into()),
+        let cfg: Config = match std::fs::read_to_string(&path) {
+            Ok(text) => toml::from_str(&text)?,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Config::default(),
+            Err(e) => return Err(e.into()),
+        };
+        cfg.validate()?;
+        Ok(cfg)
+    }
+
+    fn validate(&self) -> anyhow::Result<()> {
+        if self.routes.iter().any(|r| r.name == RESERVED_ROUTE_NAME) {
+            anyhow::bail!(
+                "[[routes]] name = \"{RESERVED_ROUTE_NAME}\" is reserved for ashkelon's own \
+                 internal endpoints (the claude-channel registration lives at \
+                 /{RESERVED_ROUTE_NAME}/...) and cannot be configured as a route."
+            );
         }
+        Ok(())
     }
 
     pub fn log_dir(&self) -> PathBuf {
@@ -198,6 +217,36 @@ fn state_home() -> PathBuf {
         .or_else(dirs::data_local_dir)
         .unwrap_or_else(|| PathBuf::from("."))
         .join("ashkelon")
+}
+
+#[cfg(test)]
+mod route_validation_tests {
+    use super::*;
+
+    #[test]
+    fn rejects_a_route_named_internal() {
+        let cfg = Config {
+            routes: vec![RouteConfig {
+                name: "internal".to_string(),
+                upstream: "http://127.0.0.1:9".to_string(),
+            }],
+            ..Config::default()
+        };
+        let err = cfg.validate().unwrap_err();
+        assert!(err.to_string().contains("reserved"));
+    }
+
+    #[test]
+    fn accepts_other_route_names() {
+        let cfg = Config {
+            routes: vec![RouteConfig {
+                name: "internal-fake".to_string(),
+                upstream: "http://127.0.0.1:9".to_string(),
+            }],
+            ..Config::default()
+        };
+        assert!(cfg.validate().is_ok());
+    }
 }
 
 #[cfg(test)]

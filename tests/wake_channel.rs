@@ -116,12 +116,13 @@ fn socket_line_is_relayed_as_a_channel_notification() {
     let mut child = Child::spawn(&socket_path);
 
     // Wait for the socket file to exist before connecting (the server creates it right away,
-    // but a fresh subprocess needs a moment to schedule).
-    for _ in 0..200 {
+    // but a fresh subprocess needs a moment to schedule — longer than a moment under a fully
+    // parallel `cargo test` run, where every other test binary is competing for the same CPUs).
+    for _ in 0..400 {
         if socket_path.exists() {
             break;
         }
-        std::thread::sleep(std::time::Duration::from_millis(10));
+        std::thread::sleep(std::time::Duration::from_millis(25));
     }
     assert!(socket_path.exists(), "socket was never created");
 

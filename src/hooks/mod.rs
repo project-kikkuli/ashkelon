@@ -410,7 +410,7 @@ impl Engine {
                 let mut sessions = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
                 if let Some(state) = sessions.get_mut(key) {
                     let duplicate = state.outbox.iter().any(|p| p.id == candidate.id)
-                        || state.delivered.iter().any(|p| p.id == candidate.id);
+                        || state.delivered_ids.contains(&candidate.id);
                     let cap = self.cfg.pings.max_per_session;
                     let at_cap = state.delivered_count + state.outbox.len() as u32 >= cap;
                     if !duplicate && !at_cap {
@@ -483,6 +483,7 @@ impl Engine {
         all_pins.extend(new_pins.iter().cloned());
 
         if let Some(new_body) = self.injector.inject(wire, body, &all_pins) {
+            state.delivered_ids.extend(new_pins.iter().map(|p| p.id.clone()));
             state.delivered.extend(new_pins.iter().cloned());
             state.delivered_count += new_pins.len() as u32;
             let ids = new_pins.into_iter().map(|p| p.id).collect();
@@ -490,9 +491,12 @@ impl Engine {
         }
 
         // The old anchors no longer line up with this body (the conversation moved under us):
-        // they're stale. Drop them and retry with only the pins we're adding now.
+        // they're stale. Drop them and retry with only the pins we're adding now. `delivered_ids`
+        // is untouched: those pings were genuinely delivered and stay deduped for the rest of the
+        // session even though their anchors are gone.
         state.delivered.clear();
         if let Some(new_body) = self.injector.inject(wire, body, &new_pins) {
+            state.delivered_ids.extend(new_pins.iter().map(|p| p.id.clone()));
             state.delivered.extend(new_pins.iter().cloned());
             state.delivered_count += new_pins.len() as u32;
             let ids = new_pins.into_iter().map(|p| p.id).collect();
@@ -541,7 +545,11 @@ impl Engine {
                 let mut sessions = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
                 if let Some(state) = sessions.get_mut(&key) {
                     // The harness will carry this as a real user turn, so it needs no anchor:
-                    // mark delivered without pinning.
+                    // mark delivered without pinning. `delivered_ids` still has to record these
+                    // ids, or an identical future failure would neither be seen as a duplicate
+                    // nor be reflected in `delivered_count`'s dedup, and would wake the agent
+                    // again for the same thing every idle-sweep tick.
+                    state.delivered_ids.extend(state.outbox.iter().map(|p| p.id.clone()));
                     state.delivered_count += state.outbox.len() as u32;
                     state.outbox.clear();
                     state.last_request_at = Instant::now();

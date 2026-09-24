@@ -1,5 +1,13 @@
 use std::future::Future;
 use std::pin::Pin;
+use std::time::Duration;
+
+use anyhow::Context;
+
+/// How long a wake command (`tmux send-keys`, `codex queue`, ...) gets before it's killed. These
+/// are meant to be near-instant local calls; an unregistered session or a stuck daemon on the
+/// other end can otherwise block the caller (`Engine::idle_sweep`'s wake loop) indefinitely.
+const WAKE_COMMAND_TIMEOUT: Duration = Duration::from_secs(12);
 
 /// Result of running a short-lived local command.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -37,7 +45,11 @@ impl CommandRunner for SystemRunner {
         args: &'a [String],
     ) -> Pin<Box<dyn Future<Output = anyhow::Result<CommandOutput>> + Send + 'a>> {
         Box::pin(async move {
-            let output = tokio::process::Command::new(program).args(args).output().await?;
+            let mut cmd = tokio::process::Command::new(program);
+            cmd.args(args).kill_on_drop(true);
+            let output = tokio::time::timeout(WAKE_COMMAND_TIMEOUT, cmd.output())
+                .await
+                .with_context(|| format!("{program} timed out after {WAKE_COMMAND_TIMEOUT:?}"))??;
             Ok(CommandOutput {
                 success: output.status.success(),
                 stdout: output.stdout,

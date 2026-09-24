@@ -764,6 +764,65 @@ async fn idle_sweep_wakes_and_marks_delivered_without_pinning() {
 }
 
 #[tokio::test]
+async fn idle_sweep_does_not_rewake_an_identical_failure_already_delivered() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut c = sandboxed_config(dir.path());
+    c.pings.wake_idle = true;
+    c.pings.idle_after_secs = 0;
+    let script = write_script(dir.path(), "lint.sh", &always_fail_with("bad"));
+    c.hooks = vec![hook("lint", vec![HookEvent::Prompt], &script)];
+    let cfg = Arc::new(c);
+
+    let woken: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    let woken2 = woken.clone();
+    let waker: WakeFn = Arc::new(move |_target, _session, text| {
+        let woken2 = woken2.clone();
+        Box::pin(async move {
+            woken2.lock().unwrap().push(text);
+            Ok(true)
+        })
+    });
+    let engine = Engine::new_with_injector(
+        cfg.clone(),
+        waker,
+        Box::new(ThresholdInjector {
+            len: 1,
+            max_ok_pins: 99,
+        }),
+    );
+    let k = key("s1");
+    engine.register_launch("l1", WakeTarget::default(), dir.path().to_path_buf());
+    let k = SessionKey {
+        launch: Some("l1".into()),
+        ..k
+    };
+
+    engine.observe_request(
+        &k,
+        Wire::AnthropicMessages,
+        br#"{"messages":[{"role":"user","content":"first"}]}"#,
+    );
+    wait_for(|| count_lines(&log_text(&cfg), "lint", "fail") >= 1).await;
+    engine.idle_sweep().await;
+    assert_eq!(woken.lock().unwrap().len(), 1, "first failure must wake once");
+
+    // A second, distinct prompt refires the same always-failing hook; it produces the identical
+    // message (hence the identical ping id) as the one already woken above.
+    engine.observe_request(
+        &k,
+        Wire::AnthropicMessages,
+        br#"{"messages":[{"role":"user","content":"second"}]}"#,
+    );
+    wait_for(|| count_lines(&log_text(&cfg), "lint", "fail") >= 2).await;
+    engine.idle_sweep().await;
+    assert_eq!(
+        woken.lock().unwrap().len(),
+        1,
+        "an identical failure already delivered by a wake must not be pinged again"
+    );
+}
+
+#[tokio::test]
 async fn idle_sweep_skips_sessions_that_are_still_recent() {
     let dir = tempfile::tempdir().unwrap();
     let mut c = sandboxed_config(dir.path());
