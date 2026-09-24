@@ -61,6 +61,17 @@ where
 /// `test` pointed at `upstream`. Returns the relay's address and its log directory (kept alive by
 /// the caller for the life of the test).
 pub async fn spawn_relay(upstream: SocketAddr, log_bodies: bool) -> (SocketAddr, tempfile::TempDir) {
+    let (addr, log_dir, _engine) = spawn_relay_with_engine(upstream, log_bodies).await;
+    (addr, log_dir)
+}
+
+/// Same as [`spawn_relay`], but also hands back the `Engine` driving it, for tests that need to
+/// observe engine-side state (e.g. a serve-mode channel registration) rather than just call
+/// records.
+pub async fn spawn_relay_with_engine(
+    upstream: SocketAddr,
+    log_bodies: bool,
+) -> (SocketAddr, tempfile::TempDir, Arc<Engine>) {
     let log_dir = tempfile::tempdir().expect("tempdir");
     let mut cfg = Config {
         log_dir: Some(log_dir.path().to_path_buf()),
@@ -77,10 +88,11 @@ pub async fn spawn_relay(upstream: SocketAddr, log_bodies: bool) -> (SocketAddr,
     let cfg = Arc::new(cfg);
     let engine = Engine::new(cfg.clone());
     let tracker = Arc::new(ashkelon::relay::Tracker::default());
+    let serve_engine = engine.clone();
     tokio::spawn(async move {
-        let _ = ashkelon::relay::serve(cfg, listener, engine, tracker).await;
+        let _ = ashkelon::relay::serve(cfg, listener, serve_engine, tracker).await;
     });
-    (addr, log_dir)
+    (addr, log_dir, engine)
 }
 
 /// One line per call in `log_dir`'s daily file, oldest first.

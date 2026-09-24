@@ -1,3 +1,4 @@
+pub mod context;
 pub mod extract;
 pub mod matching;
 mod ping;
@@ -68,6 +69,12 @@ struct LaunchInfo {
 pub struct Engine {
     cfg: Arc<Config>,
     launches: Mutex<HashMap<String, LaunchInfo>>,
+    /// Claude Code channel MCP servers that have self-registered (serve mode; `run` mode reaches
+    /// its channel through `launches` instead), keyed by `CLAUDE_CODE_SESSION_ID` — the same id
+    /// Claude Code puts in `metadata.user_id.session_id` on every request, so it is exactly
+    /// `SessionKey::session` for that session (confirmed by direct comparison against a live
+    /// Claude Code process's own environment, not assumed from documentation).
+    claude_channels: Mutex<HashMap<String, PathBuf>>,
     sessions: Mutex<HashMap<SessionKey, SessionState>>,
     hook_semaphore: Semaphore,
     waker: WakeFn,
@@ -94,6 +101,7 @@ impl Engine {
         let engine = Arc::new(Engine {
             cfg,
             launches: Mutex::new(HashMap::new()),
+            claude_channels: Mutex::new(HashMap::new()),
             sessions: Mutex::new(HashMap::new()),
             hook_semaphore: Semaphore::new(permits),
             waker,
@@ -134,6 +142,29 @@ impl Engine {
 
     fn session_dir(&self, key: &SessionKey) -> PathBuf {
         self.cfg.state_dir().join("sessions").join(session_hash(key))
+    }
+
+    /// Records a serve-mode Claude Code channel's control socket against the Claude Code session
+    /// id it reported (its own `CLAUDE_CODE_SESSION_ID`). Updates any session already tracked
+    /// under that id immediately, in case its first request arrived before this registration did;
+    /// a session created afterward picks the socket up in `record_request` instead.
+    pub fn register_claude_channel(&self, session_id: &str, socket: PathBuf) {
+        self.claude_channels
+            .lock()
+            .unwrap()
+            .insert(session_id.to_string(), socket.clone());
+        let mut sessions = self.sessions.lock().unwrap();
+        for (key, state) in sessions.iter_mut() {
+            if key.harness.as_deref() == Some("claude") && key.session == session_id {
+                state.wake_target = Some(WakeTarget {
+                    harness: "claude".to_string(),
+                    tmux_pane: None,
+                    control: Some(socket.to_string_lossy().into_owned()),
+                    control_auth: None,
+                    harness_session_id: Some(session_id.to_string()),
+                });
+            }
+        }
     }
 
     /// Called with every request the agent sent (before transforms). Fires session_start /
@@ -185,7 +216,12 @@ impl Engine {
             });
             let (cwd, wake_target) = match launch_info {
                 Some((cwd, target)) => (Some(cwd), Some(target)),
-                None => (None, None),
+                // `run` always registers a launch; a session with none was pointed at this relay
+                // directly (`ashkelon serve`), so cwd and the wake channel have to come from
+                // whatever the harness itself told the model, or from a serve-mode registration
+                // keyed by the harness's own session id (`claude_channels`, `register_launch`'s
+                // serve-mode counterpart for Claude Code's MCP channel).
+                None => (context::derive_cwd(wire, body), self.serve_mode_wake_target(key)),
             };
             sessions.insert(key.clone(), SessionState::new(cwd, wake_target));
         }
@@ -222,6 +258,42 @@ impl Engine {
         }
 
         triggers
+    }
+
+    /// Builds a [`WakeTarget`] for a session that arrived with no registered launch (serve mode),
+    /// from whatever this harness lets the daemon reach it by without one:
+    ///
+    /// - Codex always reports its own thread id as `SessionKey::session` (see
+    ///   `wake::try_verified_adapter`'s codex arm), so a bare `WakeTarget{harness: "codex"}` is
+    ///   enough; no separate registration is needed.
+    /// - Claude Code needs its channel MCP server to have self-registered under this session's id
+    ///   first (`register_claude_channel`); until then there is nothing to wake it with.
+    /// - opencode, omp, hermes, ori: no serve-mode channel exists (opencode's `serve` isn't one
+    ///   this daemon started, so its control URL and password are never known here; the others
+    ///   have no verified local channel at all — see `wake::try_verified_adapter`), and a tmux
+    ///   pane observed from the daemon's own environment would not reliably be the harness's
+    ///   pane, so none of these get a wake target in serve mode.
+    fn serve_mode_wake_target(&self, key: &SessionKey) -> Option<WakeTarget> {
+        match key.harness.as_deref() {
+            Some("codex") => Some(WakeTarget {
+                harness: "codex".to_string(),
+                tmux_pane: None,
+                control: None,
+                control_auth: None,
+                harness_session_id: None,
+            }),
+            Some("claude") => {
+                let socket = self.claude_channels.lock().unwrap().get(&key.session).cloned()?;
+                Some(WakeTarget {
+                    harness: "claude".to_string(),
+                    tmux_pane: None,
+                    control: Some(socket.to_string_lossy().into_owned()),
+                    control_auth: None,
+                    harness_session_id: Some(key.session.clone()),
+                })
+            }
+            _ => None,
+        }
     }
 
     fn record_response(&self, key: &SessionKey, summary: &Summary) -> Vec<HookTrigger> {
@@ -498,5 +570,108 @@ async fn persist_file(dir: &Path, name: &str, bytes: &[u8]) {
     let path = dir.join(name);
     if let Err(e) = crate::fsperm::write_private_file_async(&path, bytes).await {
         tracing::warn!(error = %e, "failed to write session state file");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn engine() -> Arc<Engine> {
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = Arc::new(Config {
+            state_dir: Some(dir.path().join("state")),
+            log_dir: Some(dir.path().join("logs")),
+            ..Config::default()
+        });
+        // Leaked on purpose: the tempdir only needs to outlive this test process, not be cleaned
+        // up, since these tests never assert on-disk session artifacts.
+        std::mem::forget(dir);
+        Engine::new_with_waker(cfg, Arc::new(|_target, _session, _text| Box::pin(async { Ok(false) })))
+    }
+
+    fn key(harness: &str, session: &str) -> SessionKey {
+        SessionKey {
+            launch: None,
+            harness: Some(harness.to_string()),
+            session: session.to_string(),
+        }
+    }
+
+    #[test]
+    fn serve_mode_session_gets_cwd_from_claude_body_and_no_registered_launch() {
+        let engine = engine();
+        let body = br#"{"system":"be terse","messages":[{"role":"user","content":[{"type":"text","text":"<system-reminder>\n# Environment\n - Primary working directory: /work/proj\n</system-reminder>"}]}]}"#;
+        engine.record_request(&key("claude", "sess-1"), Wire::AnthropicMessages, body);
+        let sessions = engine.sessions.lock().unwrap();
+        let state = sessions.get(&key("claude", "sess-1")).unwrap();
+        assert_eq!(state.cwd, Some(PathBuf::from("/work/proj")));
+    }
+
+    #[test]
+    fn serve_mode_codex_session_gets_a_bare_wake_target_without_any_registration() {
+        let engine = engine();
+        let body = br#"{"input":[]}"#;
+        engine.record_request(&key("codex", "thread-1"), Wire::OpenAiResponses, body);
+        let sessions = engine.sessions.lock().unwrap();
+        let state = sessions.get(&key("codex", "thread-1")).unwrap();
+        assert_eq!(state.wake_target.as_ref().map(|t| t.harness.as_str()), Some("codex"));
+    }
+
+    #[test]
+    fn serve_mode_claude_session_has_no_wake_target_before_channel_registration() {
+        let engine = engine();
+        engine.record_request(&key("claude", "sess-2"), Wire::AnthropicMessages, b"{}");
+        let sessions = engine.sessions.lock().unwrap();
+        let state = sessions.get(&key("claude", "sess-2")).unwrap();
+        assert!(state.wake_target.is_none());
+    }
+
+    #[test]
+    fn channel_registration_before_first_request_is_picked_up_on_session_creation() {
+        let engine = engine();
+        engine.register_claude_channel("sess-3", PathBuf::from("/tmp/sess-3.sock"));
+        engine.record_request(&key("claude", "sess-3"), Wire::AnthropicMessages, b"{}");
+        let sessions = engine.sessions.lock().unwrap();
+        let state = sessions.get(&key("claude", "sess-3")).unwrap();
+        let target = state.wake_target.as_ref().expect("wake target from prior registration");
+        assert_eq!(target.control.as_deref(), Some("/tmp/sess-3.sock"));
+    }
+
+    #[test]
+    fn channel_registration_after_first_request_updates_the_live_session() {
+        let engine = engine();
+        engine.record_request(&key("claude", "sess-4"), Wire::AnthropicMessages, b"{}");
+        engine.register_claude_channel("sess-4", PathBuf::from("/tmp/sess-4.sock"));
+        let sessions = engine.sessions.lock().unwrap();
+        let state = sessions.get(&key("claude", "sess-4")).unwrap();
+        let target = state.wake_target.as_ref().expect("wake target from late registration");
+        assert_eq!(target.control.as_deref(), Some("/tmp/sess-4.sock"));
+    }
+
+    #[test]
+    fn run_mode_launch_info_still_takes_priority_over_body_derived_cwd() {
+        let engine = engine();
+        engine.register_launch(
+            "launch-1",
+            WakeTarget {
+                harness: "claude".to_string(),
+                tmux_pane: None,
+                control: Some("/tmp/launch-1.sock".to_string()),
+                control_auth: None,
+                harness_session_id: None,
+            },
+            PathBuf::from("/exact/launch/cwd"),
+        );
+        let body = br#"{"messages":[{"role":"user","content":"Primary working directory: /wrong/from/body"}]}"#;
+        let k = SessionKey {
+            launch: Some("launch-1".to_string()),
+            harness: Some("claude".to_string()),
+            session: "sess-5".to_string(),
+        };
+        engine.record_request(&k, Wire::AnthropicMessages, body);
+        let sessions = engine.sessions.lock().unwrap();
+        let state = sessions.get(&k).unwrap();
+        assert_eq!(state.cwd, Some(PathBuf::from("/exact/launch/cwd")));
     }
 }

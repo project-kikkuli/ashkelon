@@ -1,5 +1,5 @@
 use std::os::unix::fs::PermissionsExt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use serde_json::{json, Value};
@@ -7,16 +7,59 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::{mpsc, Mutex};
 
+/// How this process learns which unix socket to bind.
+pub enum ChannelMode {
+    /// `ashkelon run claude` (`launch::claude::plan`) already knows the exact per-launch path and
+    /// has told the engine about it directly (`Engine::register_launch`); this process just binds
+    /// it.
+    Fixed(PathBuf),
+    /// `ashkelon install`'s Claude Code MCP registration: a single, fixed command line reused by
+    /// every Claude Code session, so it can't carry a per-session path as an argument. This
+    /// process instead mints its own socket under `socket_dir` and tells the daemon about it by
+    /// POSTing to `register_url`, keyed by its own `CLAUDE_CODE_SESSION_ID` — which is exactly the
+    /// session id Claude Code puts on the wire (`metadata.user_id.session_id`), confirmed by
+    /// direct comparison against a live process's environment and its own request body.
+    SelfRegister { socket_dir: PathBuf, register_url: String },
+}
+
 /// Runs the stdio MCP server ashkelon launches itself as (Claude Code spawns it per
-/// `--mcp-config`, per `launch::claude::plan`). Speaks just enough MCP to satisfy Claude's
-/// handshake — `initialize` (declaring `experimental: {"claude/channel": {}}`, the capability
-/// key Claude's own gate checks for — confirmed via `strings` on the installed binary),
-/// `notifications/initialized`, `ping`, `tools/list` (always empty) — then relays each line read
-/// from `socket_path` onto stdout as an unsolicited `notifications/claude/channel` push. The
-/// notification shape (`{method, params: {content, meta?}}`) is likewise pinned from the
-/// installed binary's embedded schema. Returns once stdin closes (Claude tore the subprocess
-/// down).
-pub async fn run(socket_path: &Path) -> anyhow::Result<()> {
+/// `--mcp-config`, per `launch::claude::plan` or `install`'s persistent registration). Speaks
+/// just enough MCP to satisfy Claude's handshake — `initialize` (declaring `experimental:
+/// {"claude/channel": {}}`, the capability key Claude's own gate checks for — confirmed via
+/// `strings` on the installed binary), `notifications/initialized`, `ping`, `tools/list` (always
+/// empty) — then relays each line read from its socket onto stdout as an unsolicited
+/// `notifications/claude/channel` push. The notification shape (`{method, params: {content,
+/// meta?}}`) is likewise pinned from the installed binary's embedded schema. Returns once stdin
+/// closes (Claude tore the subprocess down).
+pub async fn run(mode: ChannelMode) -> anyhow::Result<()> {
+    let socket_path = match mode {
+        ChannelMode::Fixed(path) => path,
+        ChannelMode::SelfRegister {
+            socket_dir,
+            register_url,
+        } => {
+            let session_id = std::env::var("CLAUDE_CODE_SESSION_ID").ok().filter(|s| !s.is_empty());
+            let file_stem = session_id.clone().unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+            let socket_path = socket_dir.join(format!("{file_stem}.sock"));
+            match session_id {
+                Some(id) => {
+                    if let Err(e) = register(&register_url, &id, &socket_path).await {
+                        // Non-fatal: the channel still runs and still answers Claude's MCP
+                        // handshake normally; it just never receives a wake until some later
+                        // registration attempt (there is none today) or restart succeeds. Wake
+                        // falls back to tmux/pinning for this session in the meantime.
+                        tracing::warn!(error = %e, "registering channel socket with the daemon");
+                    }
+                }
+                None => tracing::warn!(
+                    "CLAUDE_CODE_SESSION_ID not set; this channel cannot be correlated to a relay session"
+                ),
+            }
+            socket_path
+        }
+    };
+    let socket_path = socket_path.as_path();
+
     if socket_path.exists() {
         std::fs::remove_file(socket_path)?;
     }
@@ -69,6 +112,22 @@ pub async fn run(socket_path: &Path) -> anyhow::Result<()> {
 
     accept_task.abort();
     notify_task.abort();
+    Ok(())
+}
+
+/// POSTs `{"session_id", "socket"}` to the daemon's registration endpoint
+/// (`relay::pipeline::CHANNEL_REGISTER_PATH`). A plain `reqwest` call rather than the injectable
+/// `wake::runner::HttpPoster`: this runs inside the short-lived `ashkelon channel` process, which
+/// has no test double to inject it through — its behavior is exercised by the live serve-mode
+/// test instead (a real channel process registering with a real running daemon).
+async fn register(register_url: &str, session_id: &str, socket_path: &Path) -> anyhow::Result<()> {
+    let body = json!({
+        "session_id": session_id,
+        "socket": socket_path.to_string_lossy(),
+    });
+    let client = reqwest::Client::new();
+    let resp = client.post(register_url).json(&body).send().await?;
+    anyhow::ensure!(resp.status().is_success(), "registration rejected: {}", resp.status());
     Ok(())
 }
 

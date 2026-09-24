@@ -2,6 +2,7 @@ pub mod config;
 pub mod demo;
 pub mod fsperm;
 pub mod hooks;
+pub mod install;
 pub mod launch;
 pub mod model;
 pub mod relay;

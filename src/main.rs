@@ -37,13 +37,26 @@ enum Command {
     /// rules against an in-process fake provider. Reads no config file and makes no real
     /// network call.
     Demo,
-    /// The stdio MCP "channel" server `ashkelon run claude` registers itself as with Claude Code.
-    /// Not meant to be run by hand.
+    /// The stdio MCP "channel" server `ashkelon run claude` (or `ashkelon install`'s persistent
+    /// registration) registers itself as with Claude Code. Not meant to be run by hand.
     #[command(hide = true)]
     Channel {
-        #[arg(long)]
-        socket: PathBuf,
+        /// `run` mode: the exact per-launch socket path it already told the engine about.
+        #[arg(long, conflicts_with_all = ["socket_dir", "register_url"])]
+        socket: Option<PathBuf>,
+        /// `install` mode: directory this process mints its own socket file under.
+        #[arg(long, requires = "register_url")]
+        socket_dir: Option<PathBuf>,
+        /// `install` mode: daemon URL to POST `{session_id, socket}` to once bound.
+        #[arg(long, requires = "socket_dir")]
+        register_url: Option<String>,
     },
+    /// Install ashkelon as an always-on background service (macOS): a LaunchAgent running
+    /// `ashkelon serve`, agents pointed persistently at it, and the Claude Code channel wired at
+    /// user scope. Idempotent.
+    Install,
+    /// Reverses exactly what `install` changed, per its own record in `state_dir`.
+    Uninstall,
 }
 
 #[tokio::main]
@@ -66,7 +79,23 @@ async fn main() -> anyhow::Result<()> {
             args,
         } => run(cfg, &harness, no_channel, &args).await,
         Command::Model { name, system } => model(cfg, &name, system.as_deref()).await,
-        Command::Channel { socket } => ashkelon::wake::channel::run(&socket).await,
+        Command::Channel {
+            socket,
+            socket_dir,
+            register_url,
+        } => {
+            let mode = match (socket, socket_dir, register_url) {
+                (Some(socket), None, None) => ashkelon::wake::channel::ChannelMode::Fixed(socket),
+                (None, Some(socket_dir), Some(register_url)) => ashkelon::wake::channel::ChannelMode::SelfRegister {
+                    socket_dir,
+                    register_url,
+                },
+                _ => anyhow::bail!("pass either --socket, or both --socket-dir and --register-url"),
+            };
+            ashkelon::wake::channel::run(mode).await
+        }
+        Command::Install => ashkelon::install::install(&cfg, cli.config.as_deref()).await,
+        Command::Uninstall => ashkelon::install::uninstall(&cfg).await,
         Command::Demo => unreachable!("handled above"),
     }
 }

@@ -75,6 +75,13 @@ fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
     }
 }
 
+/// Where a serve-mode `ashkelon channel` process registers its control socket against the Claude
+/// Code session id it was spawned with (see `hooks::Engine::register_claude_channel`). Never
+/// collides with a provider route: every real route name is a bare path segment
+/// (`route::resolve` looks up the first segment against `builtin_upstream`/`cfg.routes`), and none
+/// of them is named `internal`.
+const CHANNEL_REGISTER_PATH: &str = "/internal/claude-channel";
+
 const HOP_BY_HOP: &[&str] = &[
     "connection",
     "keep-alive",
@@ -100,6 +107,10 @@ pub async fn handle(
     let path = uri.path().to_string();
     let query = uri.query().map(|q| format!("?{q}")).unwrap_or_default();
     let in_headers = req.headers().clone();
+
+    if path == CHANNEL_REGISTER_PATH && method == hyper::Method::POST {
+        return Ok(handle_channel_register(req, &engine).await);
+    }
 
     let Some(parsed) = route::resolve(&path, &cfg) else {
         return Ok(not_found());
@@ -519,6 +530,32 @@ fn log_body(telemetry: &Writer, call_id: &str, kind: BodyKind, bytes: &[u8]) {
         Some(Ok(())) => {}
         Some(Err(err)) => tracing::warn!(error = %err, "failed to write call body"),
         None => {}
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct ChannelRegistration {
+    session_id: String,
+    socket: String,
+}
+
+/// Body of a POST to [`CHANNEL_REGISTER_PATH`]: `{"session_id": "...", "socket": "/path/to.sock"}`.
+/// Loopback-only (the relay itself only ever binds `127.0.0.1`/local addresses), so this is trusted
+/// the same as any other local caller of the relay.
+async fn handle_channel_register(req: Request<Incoming>, engine: &Engine) -> Response<ResponseBody> {
+    let body = match req.into_body().collect().await {
+        Ok(collected) => collected.to_bytes(),
+        Err(err) => return bad_gateway(&format!("reading registration body: {err}")),
+    };
+    match serde_json::from_slice::<ChannelRegistration>(&body) {
+        Ok(reg) => {
+            engine.register_claude_channel(&reg.session_id, std::path::PathBuf::from(reg.socket));
+            json_response(StatusCode::OK, b"{\"ok\":true}".to_vec())
+        }
+        Err(err) => json_response(
+            StatusCode::BAD_REQUEST,
+            serde_json::json!({"error": err.to_string()}).to_string().into_bytes(),
+        ),
     }
 }
 
