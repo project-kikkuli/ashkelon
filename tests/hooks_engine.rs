@@ -657,6 +657,36 @@ async fn signal_is_delivered_once_without_pinning() {
 }
 
 #[tokio::test]
+async fn media_only_signal_is_queued_for_the_next_request() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut c = sandboxed_config(dir.path());
+    let script = write_script(
+        dir.path(),
+        "media-signal.sh",
+        "#!/bin/sh\ncat >/dev/null\necho '{\"status\":\"signal\",\"attachments\":[{\"mime_type\":\"image/png\",\"data_base64\":\"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==\",\"alt_text\":\"tiny image\"}]}'\n",
+    );
+    c.hooks = vec![hook("media", vec![HookEvent::Prompt], &script)];
+    let cfg = Arc::new(c);
+    let engine = Engine::new_with_injector(
+        cfg.clone(),
+        noop_waker(),
+        Box::new(ThresholdInjector {
+            len: 2,
+            max_ok_pins: 99,
+        }),
+    );
+    let k = key("media-only-session");
+    engine.observe_request(
+        &k,
+        Wire::AnthropicMessages,
+        br#"{"messages":[{"role":"user","content":"hi"}]}"#,
+    );
+    wait_for(|| count_lines(&log_text(&cfg), "media", "signal") >= 1).await;
+    let (_, ids) = engine.attach_pings(&k, Wire::AnthropicMessages, b"{}").unwrap();
+    assert_eq!(ids.len(), 1, "an empty-text image signal must not be discarded");
+}
+
+#[tokio::test]
 async fn attach_pings_reinserts_previously_delivered_pins_alongside_new_ones() {
     let dir = tempfile::tempdir().unwrap();
     let mut c = sandboxed_config(dir.path());

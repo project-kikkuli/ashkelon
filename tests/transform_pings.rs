@@ -1,4 +1,4 @@
-use ashkelon::transform::{conversation_len, inject_pings, PinnedPing};
+use ashkelon::transform::{conversation_len, inject_pings, validate_image_attachments, ImageAttachment, PinnedPing};
 use ashkelon::wire::Wire;
 use serde_json::{json, Value};
 
@@ -7,11 +7,117 @@ fn ping(id: &str, anchor: usize, text: &str) -> PinnedPing {
         id: id.to_string(),
         anchor,
         text: text.to_string(),
+        attachments: Vec::new(),
     }
 }
 
 fn parse(bytes: &[u8]) -> Value {
     serde_json::from_slice(bytes).expect("output must still be valid json")
+}
+
+fn tiny_png() -> ImageAttachment {
+    // A valid 1x1 RGBA PNG used for provider-native media shape tests.
+    ImageAttachment {
+        mime_type: "image/png".into(),
+        data_base64: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg=="
+            .into(),
+        alt_text: Some("visual reference".into()),
+    }
+}
+
+#[test]
+fn image_attachments_are_validated_and_injected_as_native_media() {
+    let image = tiny_png();
+    assert!(validate_image_attachments(std::slice::from_ref(&image)).is_ok());
+    let malformed = ImageAttachment {
+        mime_type: "image/png".into(),
+        data_base64: "bm90cG5n".into(),
+        alt_text: None,
+    };
+    assert!(validate_image_attachments(&[malformed]).is_err());
+    let mismatched = ImageAttachment {
+        mime_type: "image/jpeg".into(),
+        ..image.clone()
+    };
+    assert!(validate_image_attachments(&[mismatched]).is_err());
+    let too_many = vec![image.clone(); 9];
+    assert!(validate_image_attachments(&too_many).is_err());
+    let too_large = ImageAttachment {
+        data_base64: "A".repeat(7 * 1024 * 1024),
+        ..image.clone()
+    };
+    assert!(validate_image_attachments(&[too_large]).is_err());
+
+    let anthropic_body = json!({"messages":[{"role":"user","content":[
+        {"type":"text","text":"task"}, {"type":"tool_result","content":"preserve"}
+    ]}]});
+    let mut p = ping("media", 0, "[Auxiliary channel]");
+    p.attachments.push(image.clone());
+    let out = parse(
+        &inject_pings(
+            Wire::AnthropicMessages,
+            &serde_json::to_vec(&anthropic_body).unwrap(),
+            &[p],
+        )
+        .unwrap(),
+    );
+    let blocks = out["messages"][0]["content"].as_array().unwrap();
+    assert_eq!(blocks[0]["type"], "text");
+    assert_eq!(blocks[1]["text"], "visual reference");
+    assert_eq!(blocks[2]["type"], "image");
+    assert_eq!(blocks[2]["source"]["type"], "base64");
+    assert_eq!(blocks[2]["source"]["media_type"], "image/png");
+    assert_eq!(blocks[2]["source"]["data"], image.data_base64);
+    assert_eq!(blocks[4], anthropic_body["messages"][0]["content"][1]);
+
+    let responses_body = json!({"input":[
+        {"type":"message","role":"user","content":[{"type":"input_text","text":"task"}]},
+        {"type":"function_call_output","call_id":"c1","output":"preserve"}
+    ]});
+    let mut p = ping("media", 0, "[Auxiliary channel]");
+    p.attachments.push(image.clone());
+    let out = parse(
+        &inject_pings(
+            Wire::OpenAiResponses,
+            &serde_json::to_vec(&responses_body).unwrap(),
+            &[p],
+        )
+        .unwrap(),
+    );
+    let items = out["input"].as_array().unwrap();
+    assert_eq!(items[0]["content"][1]["type"], "input_text");
+    assert_eq!(items[0]["content"][2]["type"], "input_image");
+    assert_eq!(
+        items[0]["content"][2]["image_url"],
+        format!("data:image/png;base64,{}", image.data_base64)
+    );
+    assert_eq!(items[2], responses_body["input"][1]);
+
+    let chat_body = json!({"messages":[
+        {"role":"user","content":"task"}, {"role":"tool","tool_call_id":"c1","content":"preserve"}
+    ]});
+    let mut p = ping("media", 0, "[Auxiliary channel]");
+    p.attachments.push(image.clone());
+    let mut second_image = image.clone();
+    second_image.alt_text = Some("second visual reference".into());
+    p.attachments.push(second_image);
+    let out = parse(&inject_pings(Wire::OpenAiChat, &serde_json::to_vec(&chat_body).unwrap(), &[p]).unwrap());
+    let messages = out["messages"].as_array().unwrap();
+    assert_eq!(messages[0]["content"][1]["type"], "text");
+    assert_eq!(messages[0]["content"][2]["type"], "image_url");
+    assert_eq!(
+        messages[0]["content"][2]["image_url"]["url"],
+        format!("data:image/png;base64,{}", image.data_base64)
+    );
+    assert_eq!(messages[0]["content"][3]["text"], "second visual reference");
+    assert_eq!(messages[0]["content"][4]["type"], "image_url");
+    assert_eq!(messages[2], chat_body["messages"][1]);
+
+    // Media-only signals are valid and do not create empty provider text blocks.
+    let mut p = ping("media", 0, "");
+    p.attachments.push(image);
+    let out = parse(&inject_pings(Wire::OpenAiChat, &serde_json::to_vec(&chat_body).unwrap(), &[p]).unwrap());
+    assert_eq!(out["messages"][0]["content"].as_array().unwrap().len(), 2);
 }
 
 // ---- conversation_len ----

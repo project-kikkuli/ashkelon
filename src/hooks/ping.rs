@@ -1,6 +1,6 @@
 use sha2::{Digest, Sha256};
 
-use crate::transform::PinnedPing;
+use crate::transform::{ImageAttachment, PinnedPing};
 
 /// A hook failure not yet attached to any request.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -9,6 +9,7 @@ pub struct Ping {
     pub hook: String,
     pub text: String,
     pub transient: bool,
+    pub attachments: Vec<ImageAttachment>,
 }
 
 impl Ping {
@@ -20,16 +21,30 @@ impl Ping {
             hook: hook.to_string(),
             text,
             transient: false,
+            attachments: Vec::new(),
         }
     }
 
-    pub fn signal(hook: &str, message: &str) -> Ping {
-        let id = ping_id(hook, message);
+    pub fn signal(hook: &str, message: &str, attachments: Vec<ImageAttachment>) -> Ping {
+        let mut id_hash = Sha256::new();
+        let mut add_part = |part: &[u8]| {
+            id_hash.update((part.len() as u64).to_be_bytes());
+            id_hash.update(part);
+        };
+        add_part(hook.as_bytes());
+        add_part(message.as_bytes());
+        for image in &attachments {
+            add_part(image.mime_type.as_bytes());
+            add_part(image.data_base64.as_bytes());
+            add_part(image.alt_text.as_deref().unwrap_or("").as_bytes());
+        }
+        let id = hex::encode(id_hash.finalize())[..12].to_string();
         Ping {
             id,
             hook: hook.to_string(),
             text: message.to_string(),
             transient: true,
+            attachments,
         }
     }
 }
@@ -69,5 +84,6 @@ pub fn into_pinned(ping: &Ping, anchor: usize) -> PinnedPing {
         id: ping.id.clone(),
         anchor,
         text: ping.text.clone(),
+        attachments: ping.attachments.clone(),
     }
 }

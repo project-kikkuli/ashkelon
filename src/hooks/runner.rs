@@ -7,6 +7,7 @@ use tokio::sync::Semaphore;
 
 use crate::config::HookConfig;
 use crate::session::SessionKey;
+use crate::transform::{validate_image_attachments, ImageAttachment};
 
 use super::types::{event_name, HookTrigger};
 
@@ -17,6 +18,7 @@ pub enum Outcome {
     /// One-request user-message signal. Unlike a failure ping, it is not pinned.
     Signal {
         message: String,
+        attachments: Vec<ImageAttachment>,
     },
     Fail {
         message: String,
@@ -40,6 +42,8 @@ struct HookOutput {
     message: Option<String>,
     #[serde(default)]
     fix: Option<String>,
+    #[serde(default)]
+    attachments: Vec<ImageAttachment>,
 }
 
 /// Runs one hook command to completion (or until it times out), under `semaphore`'s concurrency
@@ -150,8 +154,12 @@ fn parse_output(buf: &[u8]) -> Outcome {
         Ok(out) => match out.status.as_str() {
             "pass" => Outcome::Pass,
             "noop" => Outcome::Noop,
-            "signal" => Outcome::Signal {
-                message: out.message.unwrap_or_default(),
+            "signal" => match validate_image_attachments(&out.attachments) {
+                Ok(()) => Outcome::Signal {
+                    message: out.message.unwrap_or_default(),
+                    attachments: out.attachments,
+                },
+                Err(e) => Outcome::Error(format!("invalid image attachment: {e}")),
             },
             "fail" => Outcome::Fail {
                 message: out.message.unwrap_or_default(),

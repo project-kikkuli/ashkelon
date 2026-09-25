@@ -119,6 +119,23 @@ message for the next request and replaces any undelivered signal from the same
 hook. It is delivered once, does not wake an idle agent, and does not clear an
 earlier failure. A `fail` becomes a ping:
 
+Signals may also carry image attachments, including a media-only signal with an
+omitted or empty `message`:
+
+```json
+{"status":"signal","message":"optional context","attachments":[
+  {"mime_type":"image/png","data_base64":"<base64 PNG bytes>","alt_text":"optional plain text label"}
+]}
+```
+
+`attachments` is optional and accepts PNG or JPEG image bytes only. Each image
+is limited to 5 MiB, with at most 8 images and 8 MiB total per signal. Ashkelon
+validates the declared MIME type against the image signature and inserts media
+as native image content for Anthropic Messages, OpenAI Responses, and Chat
+Completions requests. Image signals wait for the next provider request and are
+not sent through the text-only idle wake channel. `alt_text` is optional and
+must be at most 2000 bytes.
+
 ```
 <ashkelon-ping hook="tests-with-changes" id="…">
 what is wrong

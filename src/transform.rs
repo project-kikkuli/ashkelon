@@ -1,8 +1,57 @@
 use std::collections::HashSet;
 use std::sync::{Mutex, OnceLock};
 
+use base64::engine::general_purpose::STANDARD as BASE64;
+use base64::Engine as _;
 use regex::Regex;
 use serde_json::Value;
+
+const MAX_IMAGES_PER_PING: usize = 8;
+const MAX_IMAGE_BYTES: usize = 5 * 1024 * 1024;
+const MAX_TOTAL_IMAGE_BYTES: usize = 8 * 1024 * 1024;
+
+/// An optional image carried by a hook signal. The relay validates it before
+/// queueing, then converts it to the active provider's native image block.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ImageAttachment {
+    pub mime_type: String,
+    pub data_base64: String,
+    #[serde(default)]
+    pub alt_text: Option<String>,
+}
+
+/// Validate signal media before it enters per-session state or a provider request.
+pub fn validate_image_attachments(images: &[ImageAttachment]) -> anyhow::Result<()> {
+    if images.len() > MAX_IMAGES_PER_PING {
+        anyhow::bail!("too many image attachments");
+    }
+    let mut total = 0usize;
+    for image in images {
+        if image.data_base64.len() > MAX_IMAGE_BYTES * 4 / 3 + 8 {
+            anyhow::bail!("image attachment exceeds size limit");
+        }
+        if image.alt_text.as_ref().is_some_and(|text| text.len() > 2000) {
+            anyhow::bail!("image alt text exceeds size limit");
+        }
+        let bytes = BASE64.decode(&image.data_base64)?;
+        if bytes.is_empty() || bytes.len() > MAX_IMAGE_BYTES {
+            anyhow::bail!("image attachment exceeds size limit");
+        }
+        total = total.saturating_add(bytes.len());
+        if total > MAX_TOTAL_IMAGE_BYTES {
+            anyhow::bail!("combined image attachments exceed size limit");
+        }
+        let valid_magic = match image.mime_type.as_str() {
+            "image/png" => bytes.starts_with(b"\x89PNG\r\n\x1a\n"),
+            "image/jpeg" => bytes.starts_with(&[0xff, 0xd8, 0xff]),
+            _ => false,
+        };
+        if !valid_magic {
+            anyhow::bail!("unsupported image MIME type or mismatched image data");
+        }
+    }
+    Ok(())
+}
 
 use crate::config::{StripRule, ToolOutputTrim, TransformConfig};
 use crate::wire::Wire;
@@ -252,6 +301,8 @@ pub struct PinnedPing {
     /// Index of the conversation item (message / input item) the ping was attached to.
     pub anchor: usize,
     pub text: String,
+    #[serde(default)]
+    pub attachments: Vec<ImageAttachment>,
 }
 
 /// Returns the body with `pings` inserted, or None when the body cannot carry them
@@ -289,13 +340,31 @@ fn inject_anthropic(root: &mut Value, pings: &[PinnedPing]) -> Option<()> {
         if let Value::String(s) = content {
             *content = Value::Array(vec![serde_json::json!({"type": "text", "text": s})]);
         }
-        let additions = pings
-            .iter()
-            .filter(|p| p.anchor == anchor)
-            .map(|p| serde_json::json!({"type": "text", "text": p.text}));
+        let additions = pings.iter().filter(|p| p.anchor == anchor).flat_map(anthropic_blocks);
         content.as_array_mut()?.splice(0..0, additions);
     }
     Some(())
+}
+
+fn anthropic_blocks(ping: &PinnedPing) -> Vec<Value> {
+    let mut blocks = Vec::new();
+    if !ping.text.is_empty() {
+        blocks.push(serde_json::json!({"type": "text", "text": ping.text}));
+    }
+    for image in &ping.attachments {
+        if let Some(alt) = &image.alt_text {
+            blocks.push(serde_json::json!({"type": "text", "text": alt}));
+        }
+        blocks.push(serde_json::json!({
+            "type": "image",
+            "source": {"type": "base64", "media_type": image.mime_type, "data": image.data_base64}
+        }));
+    }
+    blocks
+}
+
+fn data_url(image: &ImageAttachment) -> String {
+    format!("data:{};base64,{}", image.mime_type, image.data_base64)
 }
 
 /// Inserts a new item just before each ping's anchor. Anchors always name a position in the ORIGINAL
@@ -304,7 +373,7 @@ fn inject_anthropic(root: &mut Value, pings: &[PinnedPing]) -> Option<()> {
 fn insert_before_original_indices(
     items: &mut Vec<Value>,
     pings: &[PinnedPing],
-    make_item: impl Fn(&str) -> Value,
+    make_item: impl Fn(&PinnedPing) -> Value,
 ) -> Option<()> {
     let len = items.len();
     if pings.iter().any(|p| p.anchor >= len) {
@@ -314,7 +383,7 @@ fn insert_before_original_indices(
     let mut rebuilt = Vec::with_capacity(original.len() + pings.len());
     for (i, item) in original.into_iter().enumerate() {
         for ping in pings.iter().filter(|p| p.anchor == i) {
-            rebuilt.push(make_item(&ping.text));
+            rebuilt.push(make_item(ping));
         }
         rebuilt.push(item);
     }
@@ -328,22 +397,39 @@ fn inject_responses(root: &mut Value, pings: &[PinnedPing]) -> Option<()> {
         *input = Value::Array(vec![Value::String(std::mem::take(s))]);
     }
     let items = root.get_mut("input")?.as_array_mut()?;
-    insert_before_original_indices(items, pings, |text| {
-        serde_json::json!({
-            "type": "message",
-            "role": "user",
-            "content": [{"type": "input_text", "text": text}],
-        })
+    insert_before_original_indices(items, pings, |ping| {
+        let mut content = Vec::new();
+        if !ping.text.is_empty() {
+            content.push(serde_json::json!({"type": "input_text", "text": ping.text}));
+        }
+        for image in &ping.attachments {
+            if let Some(alt) = &image.alt_text {
+                content.push(serde_json::json!({"type": "input_text", "text": alt}));
+            }
+            content.push(serde_json::json!({"type": "input_image", "image_url": data_url(image)}));
+        }
+        serde_json::json!({"type": "message", "role": "user", "content": content})
     })
 }
 
 fn inject_chat(root: &mut Value, pings: &[PinnedPing]) -> Option<()> {
     let messages = root.get_mut("messages")?.as_array_mut()?;
-    insert_before_original_indices(
-        messages,
-        pings,
-        |text| serde_json::json!({"role": "user", "content": text}),
-    )
+    insert_before_original_indices(messages, pings, |ping| {
+        if ping.attachments.is_empty() {
+            return serde_json::json!({"role": "user", "content": ping.text});
+        }
+        let mut content = Vec::new();
+        if !ping.text.is_empty() {
+            content.push(serde_json::json!({"type": "text", "text": ping.text}));
+        }
+        for image in &ping.attachments {
+            if let Some(alt) = &image.alt_text {
+                content.push(serde_json::json!({"type": "text", "text": alt}));
+            }
+            content.push(serde_json::json!({"type": "image_url", "image_url": {"url": data_url(image)}}));
+        }
+        serde_json::json!({"role": "user", "content": content})
+    })
 }
 
 /// Number of conversation items in a request, used as the anchor for a newly delivered ping.

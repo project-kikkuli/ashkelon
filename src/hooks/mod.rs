@@ -405,11 +405,11 @@ impl Engine {
 
         match result.outcome {
             Outcome::Noop => {}
-            Outcome::Signal { message } => {
-                if message.is_empty() {
+            Outcome::Signal { message, attachments } => {
+                if message.is_empty() && attachments.is_empty() {
                     return;
                 }
-                let candidate = Ping::signal(&hook.name, &message);
+                let candidate = Ping::signal(&hook.name, &message, attachments);
                 let mut sessions = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
                 if let Some(state) = sessions.get_mut(key) {
                     // Keep only the latest not-yet-delivered signal from this hook.
@@ -554,6 +554,11 @@ impl Engine {
                 .iter()
                 .filter_map(|(key, state)| {
                     if state.outbox.is_empty() {
+                        return None;
+                    }
+                    // Wake interfaces carry text only. Keep image signals queued for the next
+                    // provider request, where inject_pings can preserve the binary media.
+                    if state.outbox.iter().any(|ping| !ping.attachments.is_empty()) {
                         return None;
                     }
                     if now.duration_since(state.last_request_at) < idle_after {

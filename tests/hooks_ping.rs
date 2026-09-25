@@ -1,4 +1,5 @@
 use ashkelon::hooks::Ping;
+use ashkelon::transform::ImageAttachment;
 
 #[test]
 fn same_hook_and_message_yields_same_id() {
@@ -34,4 +35,18 @@ fn format_includes_fix_line_when_present() {
 #[test]
 fn hook_name_is_preserved() {
     assert_eq!(Ping::new("my-hook", "msg", None).hook, "my-hook");
+}
+
+#[test]
+fn image_signal_identity_includes_alt_text() {
+    let image = |alt: &str| ImageAttachment {
+        mime_type: "image/png".into(),
+        data_base64: "aW1hZ2U=".into(),
+        alt_text: Some(alt.into()),
+    };
+    let a = Ping::signal("agentanyl", "", vec![image("image reference A")]);
+    let same = Ping::signal("agentanyl", "", vec![image("image reference A")]);
+    let changed = Ping::signal("agentanyl", "", vec![image("image reference B")]);
+    assert_eq!(a.id, same.id);
+    assert_ne!(a.id, changed.id);
 }
