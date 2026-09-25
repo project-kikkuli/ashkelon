@@ -49,7 +49,7 @@ fn image_attachments_are_validated_and_injected_as_native_media() {
     assert!(validate_image_attachments(&[too_large]).is_err());
 
     let anthropic_body = json!({"messages":[{"role":"user","content":[
-        {"type":"text","text":"task"}, {"type":"tool_result","content":"preserve"}
+        {"type":"tool_result","content":"preserve"}, {"type":"text","text":"task"}
     ]}]});
     let mut p = ping("media", 0, "[Auxiliary channel]");
     p.attachments.push(image.clone());
@@ -62,12 +62,13 @@ fn image_attachments_are_validated_and_injected_as_native_media() {
         .unwrap(),
     );
     let blocks = out["messages"][0]["content"].as_array().unwrap();
-    assert_eq!(blocks[0]["type"], "text");
-    assert_eq!(blocks[1]["text"], "visual reference");
-    assert_eq!(blocks[2]["type"], "image");
-    assert_eq!(blocks[2]["source"]["type"], "base64");
-    assert_eq!(blocks[2]["source"]["media_type"], "image/png");
-    assert_eq!(blocks[2]["source"]["data"], image.data_base64);
+    assert_eq!(blocks[0], anthropic_body["messages"][0]["content"][0]);
+    assert_eq!(blocks[1]["type"], "text");
+    assert_eq!(blocks[2]["text"], "visual reference");
+    assert_eq!(blocks[3]["type"], "image");
+    assert_eq!(blocks[3]["source"]["type"], "base64");
+    assert_eq!(blocks[3]["source"]["media_type"], "image/png");
+    assert_eq!(blocks[3]["source"]["data"], image.data_base64);
     assert_eq!(blocks[4], anthropic_body["messages"][0]["content"][1]);
 
     let responses_body = json!({"input":[
@@ -229,6 +230,39 @@ fn anthropic_ping_on_a_non_user_anchor_is_rejected() {
 }
 
 #[test]
+fn anthropic_ping_after_tool_call_keeps_tool_results_first_and_adjacent() {
+    let body = json!({
+        "messages": [
+            {"role": "user", "content": "run the tool"},
+            {"role": "assistant", "content": [
+                {"type": "tool_use", "id": "t1", "name": "run", "input": {}},
+                {"type": "tool_use", "id": "t2", "name": "run", "input": {}}
+            ]},
+            {"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": "t1", "content": "done"},
+                {"type": "tool_result", "tool_use_id": "t2", "content": "also done"}
+            ]}
+        ]
+    });
+    let mut p = ping("p1", 2, "signal");
+    p.attachments.push(tiny_png());
+    let out = parse(&inject_pings(Wire::AnthropicMessages, &serde_json::to_vec(&body).unwrap(), &[p]).unwrap());
+    let messages = out["messages"].as_array().unwrap();
+    assert_eq!(
+        messages.len(),
+        3,
+        "do not insert a message between tool_use and its result"
+    );
+    assert_eq!(messages[1], body["messages"][1]);
+    let blocks = messages[2]["content"].as_array().unwrap();
+    assert_eq!(blocks[0], body["messages"][2]["content"][0]);
+    assert_eq!(blocks[1], body["messages"][2]["content"][1]);
+    assert_eq!(blocks[2]["text"], "signal");
+    assert_eq!(blocks[3]["text"], "visual reference");
+    assert_eq!(blocks[4]["type"], "image");
+}
+
+#[test]
 fn anthropic_ping_out_of_range_anchor_is_rejected() {
     let body = json!({"model": "claude", "messages": [{"role": "user", "content": "hi"}]});
     let out = inject_pings(
@@ -278,6 +312,26 @@ fn responses_ping_inserts_a_new_user_message_before_the_anchor() {
     assert_eq!(items[1]["content"][0]["type"], "input_text");
     assert_eq!(items[1]["content"][0]["text"], "hi");
     assert_eq!(items[2]["type"], "function_call");
+}
+
+#[test]
+fn responses_ping_after_tool_call_keeps_function_output_adjacent() {
+    let body = json!({
+        "input": [
+            {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "run"}]},
+            {"type": "function_call", "call_id": "c1", "name": "run", "arguments": "{}"},
+            {"type": "function_call_output", "call_id": "c1", "output": "done"}
+        ]
+    });
+    let mut p = ping("p1", 2, "signal");
+    p.attachments.push(tiny_png());
+    let out = parse(&inject_pings(Wire::OpenAiResponses, &serde_json::to_vec(&body).unwrap(), &[p]).unwrap());
+    let items = out["input"].as_array().unwrap();
+    assert_eq!(items[1], body["input"][1]);
+    assert_eq!(items[2], body["input"][2]);
+    assert_eq!(items[3]["role"], "user");
+    assert_eq!(items[3]["content"][0]["text"], "signal");
+    assert_eq!(items[3]["content"][2]["type"], "input_image");
 }
 
 #[test]
@@ -358,6 +412,32 @@ fn chat_ping_inserts_a_new_user_message_before_the_anchor() {
     assert_eq!(messages[1], json!({"role": "user", "content": "nudge"}));
     assert_eq!(messages[2]["content"], "hi");
     assert_eq!(messages[3]["content"], "hello");
+}
+
+#[test]
+fn chat_ping_after_tool_calls_keeps_tool_messages_contiguous() {
+    let body = json!({
+        "messages": [
+            {"role": "user", "content": "run both tools"},
+            {"role": "assistant", "tool_calls": [
+                {"id": "c1", "type": "function", "function": {"name": "one", "arguments": "{}"}},
+                {"id": "c2", "type": "function", "function": {"name": "two", "arguments": "{}"}}
+            ]},
+            {"role": "tool", "tool_call_id": "c1", "content": "one done"},
+            {"role": "tool", "tool_call_id": "c2", "content": "two done"}
+        ]
+    });
+    let mut p = ping("p1", 3, "signal");
+    p.attachments.push(tiny_png());
+    let out = parse(&inject_pings(Wire::OpenAiChat, &serde_json::to_vec(&body).unwrap(), &[p]).unwrap());
+    let messages = out["messages"].as_array().unwrap();
+    assert_eq!(messages.len(), 5);
+    assert_eq!(messages[1], body["messages"][1]);
+    assert_eq!(messages[2], body["messages"][2]);
+    assert_eq!(messages[3], body["messages"][3]);
+    assert_eq!(messages[4]["role"], "user");
+    assert_eq!(messages[4]["content"][0]["text"], "signal");
+    assert_eq!(messages[4]["content"][2]["type"], "image_url");
 }
 
 #[test]

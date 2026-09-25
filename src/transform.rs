@@ -340,8 +340,16 @@ fn inject_anthropic(root: &mut Value, pings: &[PinnedPing]) -> Option<()> {
         if let Value::String(s) = content {
             *content = Value::Array(vec![serde_json::json!({"type": "text", "text": s})]);
         }
+        let blocks = content.as_array_mut()?;
+        // Anthropic requires tool_result blocks to remain first in their user message.
+        // A generic tool_call hook can enqueue a ping before the client sends those results,
+        // so attach it after the last result block rather than in front of the result.
+        let insertion = blocks
+            .iter()
+            .rposition(|block| block.get("type").and_then(Value::as_str) == Some("tool_result"))
+            .map_or(0, |index| index + 1);
         let additions = pings.iter().filter(|p| p.anchor == anchor).flat_map(anthropic_blocks);
-        content.as_array_mut()?.splice(0..0, additions);
+        blocks.splice(insertion..insertion, additions);
     }
     Some(())
 }
@@ -367,12 +375,44 @@ fn data_url(image: &ImageAttachment) -> String {
     format!("data:{};base64,{}", image.mime_type, image.data_base64)
 }
 
-/// Inserts a new item just before each ping's anchor. Anchors always name a position in the ORIGINAL
-/// array (the position the ping was first pinned at), never a position shifted by an earlier insertion
-/// in this same call, so pings on different anchors can be applied independently of each other's order.
-fn insert_before_original_indices(
+fn inject_responses(root: &mut Value, pings: &[PinnedPing]) -> Option<()> {
+    let input = root.get_mut("input")?;
+    if let Value::String(s) = input {
+        *input = Value::Array(vec![Value::String(std::mem::take(s))]);
+    }
+    let items = root.get_mut("input")?.as_array_mut()?;
+    insert_after_tool_outputs(
+        items,
+        pings,
+        |item| {
+            matches!(
+                item.get("type").and_then(Value::as_str),
+                Some("function_call_output" | "custom_tool_call_output")
+            )
+        },
+        |ping| {
+            let mut content = Vec::new();
+            if !ping.text.is_empty() {
+                content.push(serde_json::json!({"type": "input_text", "text": ping.text}));
+            }
+            for image in &ping.attachments {
+                if let Some(alt) = &image.alt_text {
+                    content.push(serde_json::json!({"type": "input_text", "text": alt}));
+                }
+                content.push(serde_json::json!({"type": "input_image", "image_url": data_url(image)}));
+            }
+            serde_json::json!({"type": "message", "role": "user", "content": content})
+        },
+    )
+}
+
+/// Insert before a normal anchor, but after a tool-output anchor. A tool_call hook can enqueue
+/// a ping before the client sends its results. New pings anchor the final item, so this puts the
+/// ping after the trailing output batch without splitting the call/result sequence.
+fn insert_after_tool_outputs(
     items: &mut Vec<Value>,
     pings: &[PinnedPing],
+    is_tool_output: impl Fn(&Value) -> bool,
     make_item: impl Fn(&PinnedPing) -> Value,
 ) -> Option<()> {
     let len = items.len();
@@ -381,55 +421,47 @@ fn insert_before_original_indices(
     }
     let original = std::mem::take(items);
     let mut rebuilt = Vec::with_capacity(original.len() + pings.len());
-    for (i, item) in original.into_iter().enumerate() {
-        for ping in pings.iter().filter(|p| p.anchor == i) {
-            rebuilt.push(make_item(ping));
+    for (index, item) in original.into_iter().enumerate() {
+        let is_output = is_tool_output(&item);
+        if !is_output {
+            for ping in pings.iter().filter(|p| p.anchor == index) {
+                rebuilt.push(make_item(ping));
+            }
         }
         rebuilt.push(item);
+        if is_output {
+            for ping in pings.iter().filter(|p| p.anchor == index) {
+                rebuilt.push(make_item(ping));
+            }
+        }
     }
     *items = rebuilt;
     Some(())
 }
 
-fn inject_responses(root: &mut Value, pings: &[PinnedPing]) -> Option<()> {
-    let input = root.get_mut("input")?;
-    if let Value::String(s) = input {
-        *input = Value::Array(vec![Value::String(std::mem::take(s))]);
-    }
-    let items = root.get_mut("input")?.as_array_mut()?;
-    insert_before_original_indices(items, pings, |ping| {
-        let mut content = Vec::new();
-        if !ping.text.is_empty() {
-            content.push(serde_json::json!({"type": "input_text", "text": ping.text}));
-        }
-        for image in &ping.attachments {
-            if let Some(alt) = &image.alt_text {
-                content.push(serde_json::json!({"type": "input_text", "text": alt}));
-            }
-            content.push(serde_json::json!({"type": "input_image", "image_url": data_url(image)}));
-        }
-        serde_json::json!({"type": "message", "role": "user", "content": content})
-    })
-}
-
 fn inject_chat(root: &mut Value, pings: &[PinnedPing]) -> Option<()> {
     let messages = root.get_mut("messages")?.as_array_mut()?;
-    insert_before_original_indices(messages, pings, |ping| {
-        if ping.attachments.is_empty() {
-            return serde_json::json!({"role": "user", "content": ping.text});
-        }
-        let mut content = Vec::new();
-        if !ping.text.is_empty() {
-            content.push(serde_json::json!({"type": "text", "text": ping.text}));
-        }
-        for image in &ping.attachments {
-            if let Some(alt) = &image.alt_text {
-                content.push(serde_json::json!({"type": "text", "text": alt}));
+    insert_after_tool_outputs(
+        messages,
+        pings,
+        |message| message.get("role").and_then(Value::as_str) == Some("tool"),
+        |ping| {
+            if ping.attachments.is_empty() {
+                return serde_json::json!({"role": "user", "content": ping.text});
             }
-            content.push(serde_json::json!({"type": "image_url", "image_url": {"url": data_url(image)}}));
-        }
-        serde_json::json!({"role": "user", "content": content})
-    })
+            let mut content = Vec::new();
+            if !ping.text.is_empty() {
+                content.push(serde_json::json!({"type": "text", "text": ping.text}));
+            }
+            for image in &ping.attachments {
+                if let Some(alt) = &image.alt_text {
+                    content.push(serde_json::json!({"type": "text", "text": alt}));
+                }
+                content.push(serde_json::json!({"type": "image_url", "image_url": {"url": data_url(image)}}));
+            }
+            serde_json::json!({"role": "user", "content": content})
+        },
+    )
 }
 
 /// Number of conversation items in a request, used as the anchor for a newly delivered ping.
