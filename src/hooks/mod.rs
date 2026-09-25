@@ -249,6 +249,7 @@ impl Engine {
                 let fp = ping::fingerprint(&prompt);
                 if state.last_prompt_fingerprint.as_deref() != Some(fp.as_str()) {
                     state.last_prompt_fingerprint = Some(fp);
+                    state.last_prompt = Some(prompt.clone());
                     triggers.push(HookTrigger::with_prompt(HookEvent::Prompt, prompt));
                 }
             }
@@ -311,7 +312,9 @@ impl Engine {
             triggers.push(HookTrigger::with_tool_calls(HookEvent::ToolCall, names));
         }
         if summary.turn_end {
-            triggers.push(HookTrigger::with_text(HookEvent::TurnEnd, summary.text.clone()));
+            let mut trigger = HookTrigger::with_text(HookEvent::TurnEnd, summary.text.clone());
+            trigger.prompt = state.last_prompt.clone();
+            triggers.push(trigger);
         }
         triggers
     }
@@ -391,6 +394,8 @@ impl Engine {
     async fn apply_outcome(&self, key: &SessionKey, hook: &HookConfig, event: HookEvent, result: runner::RunResult) {
         let status = match &result.outcome {
             Outcome::Pass => "pass",
+            Outcome::Noop => "noop",
+            Outcome::Signal { .. } => "signal",
             Outcome::Fail { .. } => "fail",
             Outcome::Timeout => "timeout",
             Outcome::Error(_) => "error",
@@ -399,6 +404,22 @@ impl Engine {
             .await;
 
         match result.outcome {
+            Outcome::Noop => {}
+            Outcome::Signal { message } => {
+                if message.is_empty() {
+                    return;
+                }
+                let candidate = Ping::signal(&hook.name, &message);
+                let mut sessions = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
+                if let Some(state) = sessions.get_mut(key) {
+                    // Keep only the latest not-yet-delivered signal from this hook.
+                    state.outbox.retain(|p| p.hook != hook.name || !p.transient);
+                    let cap = self.cfg.pings.max_per_session;
+                    if state.delivered_count + (state.outbox.len() as u32) < cap {
+                        state.outbox.push(candidate);
+                    }
+                }
+            }
             Outcome::Pass => {
                 let mut sessions = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
                 if let Some(state) = sessions.get_mut(key) {
@@ -484,7 +505,12 @@ impl Engine {
 
         if let Some(new_body) = self.injector.inject(wire, body, &all_pins) {
             state.delivered_ids.extend(new_pins.iter().map(|p| p.id.clone()));
-            state.delivered.extend(new_pins.iter().cloned());
+            state.delivered.extend(
+                new_pings
+                    .iter()
+                    .zip(new_pins.iter())
+                    .filter_map(|(p, pin)| (!p.transient).then_some(pin.clone())),
+            );
             state.delivered_count += new_pins.len() as u32;
             let ids = new_pins.into_iter().map(|p| p.id).collect();
             return Some((new_body, ids));
@@ -497,7 +523,12 @@ impl Engine {
         state.delivered.clear();
         if let Some(new_body) = self.injector.inject(wire, body, &new_pins) {
             state.delivered_ids.extend(new_pins.iter().map(|p| p.id.clone()));
-            state.delivered.extend(new_pins.iter().cloned());
+            state.delivered.extend(
+                new_pings
+                    .iter()
+                    .zip(new_pins.iter())
+                    .filter_map(|(p, pin)| (!p.transient).then_some(pin.clone())),
+            );
             state.delivered_count += new_pins.len() as u32;
             let ids = new_pins.into_iter().map(|p| p.id).collect();
             return Some((new_body, ids));

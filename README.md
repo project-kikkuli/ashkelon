@@ -113,7 +113,11 @@ It prints one JSON object:
 {"status": "fail", "message": "what is wrong", "fix": "what to do about it"}
 ```
 
-`pass` clears any earlier failure of that hook for the session. A `fail` becomes a ping:
+`pass` clears any earlier failure of that hook for the session. `noop` leaves the
+hook's queued messages alone. `signal` with a `message` queues a transient
+message for the next request and replaces any undelivered signal from the same
+hook. It is delivered once, does not wake an idle agent, and does not clear an
+earlier failure. A `fail` becomes a ping:
 
 ```
 <ashkelon-ping hook="tests-with-changes" id="…">
@@ -122,7 +126,10 @@ fix: what to do about it
 </ashkelon-ping>
 ```
 
-The same failure is never pinged twice, and each session has a cap. A hook can use a model through `$ASHKELON_BIN model <name> --system "…"` (prompt on stdin, text on stdout); see [`examples/hooks/`](examples/hooks/).
+The same failure is never pinged twice, and each session has a cap. Both pings
+and signals enter as user text immediately before the current user prompt.
+Hooks can use a model through `$ASHKELON_BIN model <name> --system "…"` (prompt
+on stdin, text on stdout); see [`examples/hooks/`](examples/hooks/).
 
 ### How a ping reaches the agent
 

@@ -270,7 +270,7 @@ pub fn inject_pings(wire: Wire, body: &[u8], pings: &[PinnedPing]) -> Option<Vec
     serde_json::to_vec(&root).ok()
 }
 
-/// Appends each ping's text as a new text block on the existing user message at its anchor. Every anchor
+/// Prepends each ping's text as a new text block on the existing user message at its anchor. Every anchor
 /// must exist and name a user message before any of them are applied, so a body is never partially rewritten.
 fn inject_anthropic(root: &mut Value, pings: &[PinnedPing]) -> Option<()> {
     let messages = root.get_mut("messages")?.as_array_mut()?;
@@ -280,23 +280,28 @@ fn inject_anthropic(root: &mut Value, pings: &[PinnedPing]) -> Option<()> {
             return None;
         }
     }
-    for ping in pings {
-        let msg = messages.get_mut(ping.anchor)?;
+    for anchor in 0..messages.len() {
+        if !pings.iter().any(|p| p.anchor == anchor) {
+            continue;
+        }
+        let msg = messages.get_mut(anchor)?;
         let content = msg.get_mut("content")?;
         if let Value::String(s) = content {
             *content = Value::Array(vec![serde_json::json!({"type": "text", "text": s})]);
         }
-        content
-            .as_array_mut()?
-            .push(serde_json::json!({"type": "text", "text": ping.text}));
+        let additions = pings
+            .iter()
+            .filter(|p| p.anchor == anchor)
+            .map(|p| serde_json::json!({"type": "text", "text": p.text}));
+        content.as_array_mut()?.splice(0..0, additions);
     }
     Some(())
 }
 
-/// Inserts a new item right after each ping's anchor. Anchors always name a position in the ORIGINAL
+/// Inserts a new item just before each ping's anchor. Anchors always name a position in the ORIGINAL
 /// array (the position the ping was first pinned at), never a position shifted by an earlier insertion
 /// in this same call, so pings on different anchors can be applied independently of each other's order.
-fn insert_after_original_indices(
+fn insert_before_original_indices(
     items: &mut Vec<Value>,
     pings: &[PinnedPing],
     make_item: impl Fn(&str) -> Value,
@@ -308,10 +313,10 @@ fn insert_after_original_indices(
     let original = std::mem::take(items);
     let mut rebuilt = Vec::with_capacity(original.len() + pings.len());
     for (i, item) in original.into_iter().enumerate() {
-        rebuilt.push(item);
         for ping in pings.iter().filter(|p| p.anchor == i) {
             rebuilt.push(make_item(&ping.text));
         }
+        rebuilt.push(item);
     }
     *items = rebuilt;
     Some(())
@@ -323,7 +328,7 @@ fn inject_responses(root: &mut Value, pings: &[PinnedPing]) -> Option<()> {
         *input = Value::Array(vec![Value::String(std::mem::take(s))]);
     }
     let items = root.get_mut("input")?.as_array_mut()?;
-    insert_after_original_indices(items, pings, |text| {
+    insert_before_original_indices(items, pings, |text| {
         serde_json::json!({
             "type": "message",
             "role": "user",
@@ -334,7 +339,7 @@ fn inject_responses(root: &mut Value, pings: &[PinnedPing]) -> Option<()> {
 
 fn inject_chat(root: &mut Value, pings: &[PinnedPing]) -> Option<()> {
     let messages = root.get_mut("messages")?.as_array_mut()?;
-    insert_after_original_indices(
+    insert_before_original_indices(
         messages,
         pings,
         |text| serde_json::json!({"role": "user", "content": text}),

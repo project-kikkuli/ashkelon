@@ -13,6 +13,11 @@ use super::types::{event_name, HookTrigger};
 /// What a hook run amounted to.
 pub enum Outcome {
     Pass,
+    Noop,
+    /// One-request user-message signal. Unlike a failure ping, it is not pinned.
+    Signal {
+        message: String,
+    },
     Fail {
         message: String,
         fix: Option<String>,
@@ -144,6 +149,10 @@ fn parse_output(buf: &[u8]) -> Outcome {
     match serde_json::from_slice::<HookOutput>(buf) {
         Ok(out) => match out.status.as_str() {
             "pass" => Outcome::Pass,
+            "noop" => Outcome::Noop,
+            "signal" => Outcome::Signal {
+                message: out.message.unwrap_or_default(),
+            },
             "fail" => Outcome::Fail {
                 message: out.message.unwrap_or_default(),
                 fix: out.fix,

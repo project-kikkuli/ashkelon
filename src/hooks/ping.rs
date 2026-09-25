@@ -8,6 +8,7 @@ pub struct Ping {
     pub id: String,
     pub hook: String,
     pub text: String,
+    pub transient: bool,
 }
 
 impl Ping {
@@ -18,6 +19,17 @@ impl Ping {
             id,
             hook: hook.to_string(),
             text,
+            transient: false,
+        }
+    }
+
+    pub fn signal(hook: &str, message: &str) -> Ping {
+        let id = ping_id(hook, message);
+        Ping {
+            id,
+            hook: hook.to_string(),
+            text: message.to_string(),
+            transient: true,
         }
     }
 }

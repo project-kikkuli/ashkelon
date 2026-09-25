@@ -24,6 +24,8 @@ pub struct SessionState {
     pub last_request_at: Instant,
     pub prev_conversation_len: Option<usize>,
     pub last_prompt_fingerprint: Option<String>,
+    /// Latest user prompt, carried into turn_end for criterion attribution.
+    pub last_prompt: Option<String>,
     pub cwd: Option<PathBuf>,
     pub wake_target: Option<WakeTarget>,
     /// Hook failures not yet attached to any outgoing request.
@@ -47,6 +49,7 @@ impl SessionState {
             last_request_at: now,
             prev_conversation_len: None,
             last_prompt_fingerprint: None,
+            last_prompt: None,
             cwd,
             wake_target,
             outbox: Vec::new(),

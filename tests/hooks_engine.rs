@@ -7,6 +7,7 @@ use ashkelon::config::{Config, HookConfig, HookEvent};
 use ashkelon::hooks::{Engine, PinInjector, WakeFn};
 use ashkelon::session::SessionKey;
 use ashkelon::transform::PinnedPing;
+use ashkelon::usage::Summary;
 use ashkelon::wake::WakeTarget;
 use ashkelon::wire::Wire;
 
@@ -489,6 +490,43 @@ async fn hook_receives_the_documented_stdin_and_env() {
     );
 }
 
+#[tokio::test]
+async fn turn_end_carries_the_prompt_that_started_the_turn() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut c = sandboxed_config(dir.path());
+    let captured = dir.path().join("turn.json");
+    let script = write_script(
+        dir.path(),
+        "turn.sh",
+        &format!(
+            "#!/bin/sh\ncat > {}\necho '{{\"status\":\"pass\"}}'\n",
+            captured.display()
+        ),
+    );
+    c.hooks = vec![hook("turn", vec![HookEvent::TurnEnd], &script)];
+    let cfg = Arc::new(c);
+    let engine = Engine::new(cfg.clone());
+    let k = key("turn-session");
+    engine.observe_request(
+        &k,
+        Wire::AnthropicMessages,
+        br#"{"messages":[{"role":"user","content":"the actual task"}]}"#,
+    );
+    engine.observe_response(
+        &k,
+        Wire::AnthropicMessages,
+        &Summary {
+            turn_end: true,
+            text: "the answer".into(),
+            ..Summary::default()
+        },
+    );
+    wait_for(|| count_lines(&log_text(&cfg), "turn", "pass") >= 1).await;
+    let payload: serde_json::Value = serde_json::from_slice(&std::fs::read(captured).unwrap()).unwrap();
+    assert_eq!(payload["prompt"], "the actual task");
+    assert_eq!(payload["text"], "the answer");
+}
+
 // --- persisted per-session context -----------------------------------------------------------
 
 #[tokio::test]
@@ -585,6 +623,37 @@ async fn attach_pings_delivers_a_pending_failure() {
     let (body2, ids2) = engine.attach_pings(&k, Wire::AnthropicMessages, b"{}").unwrap();
     assert!(ids2.is_empty());
     assert!(body2.ends_with(b":1"));
+}
+
+#[tokio::test]
+async fn signal_is_delivered_once_without_pinning() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut c = sandboxed_config(dir.path());
+    let script = write_script(
+        dir.path(),
+        "signal.sh",
+        "#!/bin/sh\ncat >/dev/null\necho '{\"status\":\"signal\",\"message\":\"feedback\"}'\n",
+    );
+    c.hooks = vec![hook("feedback", vec![HookEvent::Prompt], &script)];
+    let cfg = Arc::new(c);
+    let engine = Engine::new_with_injector(
+        cfg.clone(),
+        noop_waker(),
+        Box::new(ThresholdInjector {
+            len: 2,
+            max_ok_pins: 99,
+        }),
+    );
+    let k = key("signal-session");
+    engine.observe_request(
+        &k,
+        Wire::AnthropicMessages,
+        br#"{"messages":[{"role":"user","content":"hi"}]}"#,
+    );
+    wait_for(|| count_lines(&log_text(&cfg), "feedback", "signal") >= 1).await;
+    let (_, ids) = engine.attach_pings(&k, Wire::AnthropicMessages, b"{}").unwrap();
+    assert_eq!(ids.len(), 1);
+    assert!(engine.attach_pings(&k, Wire::AnthropicMessages, b"{}").is_none());
 }
 
 #[tokio::test]

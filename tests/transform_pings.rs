@@ -68,7 +68,7 @@ fn inject_pings_with_no_pings_returns_original_bytes() {
 // ---- Anthropic ----
 
 #[test]
-fn anthropic_ping_is_appended_as_a_text_block_on_the_anchored_user_message() {
+fn anthropic_ping_precedes_current_user_text() {
     let body = json!({
         "model": "claude",
         "messages": [
@@ -86,14 +86,14 @@ fn anthropic_ping_is_appended_as_a_text_block_on_the_anchored_user_message() {
     let content = out["messages"][0]["content"].as_array().unwrap();
     assert_eq!(content.len(), 2);
     assert_eq!(content[0]["type"], "text");
-    assert_eq!(content[0]["text"], "hello");
-    assert_eq!(content[1], json!({"type": "text", "text": "a nudge"}));
+    assert_eq!(content[0], json!({"type": "text", "text": "a nudge"}));
+    assert_eq!(content[1]["text"], "hello");
     // The assistant message at index 1 is untouched.
     assert_eq!(out["messages"][1]["content"][0]["text"], "hi");
 }
 
 #[test]
-fn anthropic_multiple_pings_on_the_same_anchor_are_appended_in_order() {
+fn anthropic_multiple_pings_on_the_same_anchor_precede_prompt_in_order() {
     let body =
         json!({"model": "claude", "messages": [{"role": "user", "content": [{"type": "text", "text": "start"}]}]});
     let pings = vec![ping("p1", 0, "first"), ping("p2", 0, "second")];
@@ -106,8 +106,9 @@ fn anthropic_multiple_pings_on_the_same_anchor_are_appended_in_order() {
     let out = parse(&out);
     let content = out["messages"][0]["content"].as_array().unwrap();
     assert_eq!(content.len(), 3);
-    assert_eq!(content[1]["text"], "first");
-    assert_eq!(content[2]["text"], "second");
+    assert_eq!(content[0]["text"], "first");
+    assert_eq!(content[1]["text"], "second");
+    assert_eq!(content[2]["text"], "start");
 }
 
 #[test]
@@ -148,7 +149,7 @@ fn anthropic_partial_failure_rejects_the_whole_batch() {
 // ---- Responses ----
 
 #[test]
-fn responses_ping_inserts_a_new_user_message_right_after_the_anchor() {
+fn responses_ping_inserts_a_new_user_message_before_the_anchor() {
     let body = json!({
         "model": "gpt",
         "input": [
@@ -165,11 +166,11 @@ fn responses_ping_inserts_a_new_user_message_right_after_the_anchor() {
     let out = parse(&out);
     let items = out["input"].as_array().unwrap();
     assert_eq!(items.len(), 3);
-    assert_eq!(items[0]["role"], "user");
+    assert_eq!(items[0]["content"][0]["text"], "nudge");
     assert_eq!(items[1]["type"], "message");
     assert_eq!(items[1]["role"], "user");
     assert_eq!(items[1]["content"][0]["type"], "input_text");
-    assert_eq!(items[1]["content"][0]["text"], "nudge");
+    assert_eq!(items[1]["content"][0]["text"], "hi");
     assert_eq!(items[2]["type"], "function_call");
 }
 
@@ -185,9 +186,9 @@ fn responses_string_input_is_treated_as_a_single_item_at_index_zero() {
     let out = parse(&out);
     let items = out["input"].as_array().unwrap();
     assert_eq!(items.len(), 2);
-    assert_eq!(items[0], json!("just a prompt"));
-    assert_eq!(items[1]["role"], "user");
-    assert_eq!(items[1]["content"][0]["text"], "nudge");
+    assert_eq!(items[0]["role"], "user");
+    assert_eq!(items[0]["content"][0]["text"], "nudge");
+    assert_eq!(items[1], json!("just a prompt"));
 }
 
 #[test]
@@ -221,16 +222,16 @@ fn responses_multiple_pings_on_different_anchors_use_original_positions() {
     let out = parse(&out);
     let items = out["input"].as_array().unwrap();
     assert_eq!(items.len(), 4);
-    assert_eq!(items[0]["content"][0]["text"], "one");
-    assert_eq!(items[1]["content"][0]["text"], "after-one");
-    assert_eq!(items[2]["content"][0]["text"], "two");
-    assert_eq!(items[3]["content"][0]["text"], "after-two");
+    assert_eq!(items[0]["content"][0]["text"], "after-one");
+    assert_eq!(items[1]["content"][0]["text"], "one");
+    assert_eq!(items[2]["content"][0]["text"], "after-two");
+    assert_eq!(items[3]["content"][0]["text"], "two");
 }
 
 // ---- Chat ----
 
 #[test]
-fn chat_ping_inserts_a_new_user_message_right_after_the_anchor() {
+fn chat_ping_inserts_a_new_user_message_before_the_anchor() {
     let body = json!({
         "model": "gpt-4",
         "messages": [
@@ -248,8 +249,8 @@ fn chat_ping_inserts_a_new_user_message_right_after_the_anchor() {
     let out = parse(&out);
     let messages = out["messages"].as_array().unwrap();
     assert_eq!(messages.len(), 4);
-    assert_eq!(messages[1]["content"], "hi");
-    assert_eq!(messages[2], json!({"role": "user", "content": "nudge"}));
+    assert_eq!(messages[1], json!({"role": "user", "content": "nudge"}));
+    assert_eq!(messages[2]["content"], "hi");
     assert_eq!(messages[3]["content"], "hello");
 }
 
