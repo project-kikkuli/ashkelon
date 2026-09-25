@@ -72,6 +72,14 @@ impl ResponsesSink {
                     .unwrap_or("")
                     .to_string();
                 let name = str_field(item, "name").unwrap_or_default();
+                if !id.is_empty() {
+                    if let Some(existing) = self.tool_calls.iter_mut().find(|call| call.id == id) {
+                        if existing.name.is_empty() {
+                            existing.name = name;
+                        }
+                        return;
+                    }
+                }
                 self.tool_calls.push(ToolCall { id, name });
             }
             Some("message") if harvest_text => {
@@ -117,6 +125,11 @@ impl EventSink for ResponsesSink {
         let Some(value) = parse_event_json(data) else { return };
         let ty = value.get("type").and_then(|v| v.as_str()).or(event_type).unwrap_or("");
         match ty {
+            "response.output_item.done" => {
+                if let Some(item) = value.get("item") {
+                    self.consume_output_item(item, false);
+                }
+            }
             "response.created" | "response.in_progress" => {
                 if let Some(resp) = value.get("response") {
                     self.take_model_id(resp);

@@ -79,6 +79,41 @@ fn streaming_completed_with_no_tool_calls_ends_the_turn() {
 }
 
 #[test]
+fn streaming_custom_tool_item_done_is_a_tool_call_without_terminal_output() {
+    let stream = concat!(
+        "event: response.output_item.done\n",
+        "data: {\"type\":\"response.output_item.done\",\"output_index\":2,\"item\":{\"type\":\"custom_tool_call\",\"call_id\":\"call_2\",\"name\":\"custom_op\",\"input\":\"{}\"}}\n\n",
+        "event: response.completed\n",
+        "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_7\",\"model\":\"gpt-x\",\"status\":\"completed\",\"output\":[]}}\n\n",
+    );
+
+    let (summary, _, _) = run(&[stream.as_bytes()]);
+    assert!(!summary.turn_end);
+    assert_eq!(summary.tool_calls.len(), 1);
+    assert_eq!(summary.tool_calls[0].id, "call_2");
+    assert_eq!(summary.tool_calls[0].name, "custom_op");
+}
+
+#[test]
+fn streaming_output_item_done_deduplicates_terminal_output() {
+    let mut stream = String::new();
+    stream += &sse_event(
+        "response.output_item.done",
+        r#"{"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","call_id":"call_3","name":"run","arguments":"{}"}}"#,
+    );
+    stream += &sse_event(
+        "response.completed",
+        r#"{"type":"response.completed","response":{"id":"resp_8","model":"gpt-x","status":"completed","output":[{"type":"function_call","call_id":"call_3","name":"run","arguments":"{}"}]}}"#,
+    );
+
+    let (summary, _, _) = run(&[stream.as_bytes()]);
+    assert!(!summary.turn_end);
+    assert_eq!(summary.tool_calls.len(), 1);
+    assert_eq!(summary.tool_calls[0].id, "call_3");
+    assert_eq!(summary.tool_calls[0].name, "run");
+}
+
+#[test]
 fn web_search_call_is_excluded_from_tool_calls() {
     let stream = sse_event(
         "response.completed",

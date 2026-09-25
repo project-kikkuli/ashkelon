@@ -67,9 +67,9 @@ fn claude_wires_the_mcp_channel_by_default() {
             dir.join("launch").join("chan1.sock").to_string_lossy()
         ])
     );
-    assert!(
-        server["command"].as_str().unwrap().ends_with("ashkelon")
-            || server["command"].as_str().unwrap().contains("ashkelon")
+    assert_eq!(
+        server["command"].as_str().unwrap(),
+        std::env::current_exe().unwrap().to_string_lossy()
     );
 
     assert!(plan
