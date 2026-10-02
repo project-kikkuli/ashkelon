@@ -22,10 +22,7 @@ impl SseSplitter {
 
     pub fn feed(&mut self, chunk: &[u8], mut on_event: impl FnMut(Option<&str>, &str)) {
         self.buf.extend_from_slice(chunk);
-        loop {
-            let Some(pos) = self.buf.iter().position(|&b| b == b'\n') else {
-                break;
-            };
+        while let Some(pos) = self.buf.iter().position(|&b| b == b'\n') {
             let mut line_bytes: Vec<u8> = self.buf.drain(..=pos).collect();
             line_bytes.pop(); // trailing '\n'
             if line_bytes.last() == Some(&b'\r') {
