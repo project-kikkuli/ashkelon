@@ -1,0 +1,20 @@
+name: Tests
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy,rustfmt
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just
+      - run: cargo test --locked
+      - run: cargo fmt -- --check
+      - run: cargo clippy --locked --all-targets --all-features -- -D warnings

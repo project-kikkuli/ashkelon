@@ -21,6 +21,9 @@ fn builtin_upstream(name: &str) -> Option<&'static str> {
         // Plain HTTP: the client already builds an `https_or_http()` connector, so a local
         // Ollama server (never TLS-terminated) is forwarded exactly like any other upstream.
         "ollama" => Some("http://127.0.0.1:11434"),
+        "cursor" => Some("https://api2.cursor.sh"),
+        "api" => Some("http://127.0.0.1:11434/api"),
+        "v1" => Some("http://127.0.0.1:11434/v1"),
         _ => None,
     }
 }

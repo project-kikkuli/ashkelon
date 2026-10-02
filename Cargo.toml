@@ -44,6 +44,7 @@ toml_edit = "0.25.15"
 test-util = []
 
 [dev-dependencies]
+time = { version = "0.3", features = ["parsing"] }
 ashkelon = { path = ".", features = ["test-util"] }
 tempfile = "3"
 flate2 = "1"

@@ -1,5 +1,6 @@
 mod claude;
 mod codex;
+mod cursor;
 mod hermes;
 mod omp;
 mod opencode;
@@ -121,13 +122,10 @@ pub fn plan(
         "omp" => omp::plan(relay_base, launch, args, options),
         "hermes" => hermes::plan(relay_base, launch, args, options),
         "ori" => ori::plan(relay_base, launch, args, options),
-        "cursor" => anyhow::bail!(
-            "cursor is not supported: neither the cursor-agent CLI nor the Cursor IDE has a base-URL/endpoint override, \
-             so there is nothing ashkelon can route through the relay (see routing report)"
-        ),
-        other => anyhow::bail!(
-            "unsupported harness: {other} (supported: claude, codex, opencode, omp, hermes, ori)"
-        ),
+        "cursor" => cursor::plan(relay_base, launch, args, options),
+        other => {
+            anyhow::bail!("unsupported harness: {other} (supported: claude, codex, opencode, omp, hermes, ori, cursor)")
+        }
     }
 }
 
