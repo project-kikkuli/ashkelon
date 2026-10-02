@@ -102,6 +102,7 @@ pub async fn handle(
     telemetry: Arc<Writer>,
     tracker: Arc<Tracker>,
 ) -> Result<Response<ResponseBody>, Infallible> {
+    let started_at = now_ts();
     let call_id = uuid::Uuid::new_v4().to_string();
     let method = req.method().clone();
     let uri = req.uri().clone();
@@ -156,7 +157,7 @@ pub async fn handle(
     if let PreDecision::Reject { rule, message } = decision {
         let (status, resp_body) = rules::reject_response(wire, &rule, &message);
         let record = CallRecord {
-            ts: now_ts(),
+            ts: started_at.clone(),
             call_id: call_id.clone(),
             session: key,
             route: parsed.route,
@@ -214,13 +215,11 @@ pub async fn handle(
         (raw_request.to_vec(), strip_hop_by_hop(&in_headers))
     };
     out_headers.remove(HOST);
+    out_headers.remove("x-ashkelon-launch");
 
     let Some(upstream_uri) = build_upstream_uri(&parsed.upstream, &parsed.rest, &query) else {
         return Ok(bad_gateway("invalid upstream route"));
     };
-    if let Some(host_value) = host_header_value(&upstream_uri) {
-        out_headers.insert(HOST, host_value);
-    }
 
     let mut builder = Request::builder().method(method.clone()).uri(upstream_uri);
     *builder.headers_mut().unwrap() = out_headers;
@@ -233,8 +232,9 @@ pub async fn handle(
     let upstream_resp = match client.request(upstream_req).await {
         Ok(r) => r,
         Err(err) => {
+            let detail = upstream_error_message(&err);
             let record = CallRecord {
-                ts: now_ts(),
+                ts: started_at.clone(),
                 call_id: call_id.clone(),
                 session: key,
                 route: parsed.route,
@@ -254,10 +254,10 @@ pub async fn handle(
                 transforms: transform_names,
                 pings_injected,
                 rule: None,
-                error: Some(format!("upstream connect failed: {err}")),
+                error: Some(format!("upstream connect failed: {detail}")),
             };
             log_record(&telemetry, &record);
-            return Ok(bad_gateway(&format!("connecting upstream: {err}")));
+            return Ok(bad_gateway(&format!("connecting upstream: {detail}")));
         }
     };
 
@@ -286,6 +286,7 @@ pub async fn handle(
     tokio::spawn(async move {
         let _tracker_guard = tracker_guard;
         forward_response(ForwardArgs {
+            started_at,
             call_id,
             key,
             route: parsed.route,
@@ -319,6 +320,7 @@ pub async fn handle(
 }
 
 struct ForwardArgs {
+    started_at: String,
     call_id: String,
     key: SessionKey,
     route: String,
@@ -461,7 +463,7 @@ async fn forward_response(args: ForwardArgs) {
     let error = error.or(parser_error);
 
     let record = CallRecord {
-        ts: now_ts(),
+        ts: args.started_at,
         call_id: args.call_id.clone(),
         session: args.key,
         route: args.route,
@@ -507,15 +509,6 @@ fn header_str<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
 
 fn build_upstream_uri(upstream: &str, rest: &str, query: &str) -> Option<http::Uri> {
     format!("{upstream}{rest}{query}").parse().ok()
-}
-
-fn host_header_value(uri: &http::Uri) -> Option<HeaderValue> {
-    let host = uri.host()?;
-    let value = match uri.port_u16() {
-        Some(port) => format!("{host}:{port}"),
-        None => host.to_string(),
-    };
-    HeaderValue::from_str(&value).ok()
 }
 
 fn log_record(telemetry: &Writer, record: &CallRecord) {
@@ -593,10 +586,122 @@ fn bad_gateway(message: &str) -> Response<ResponseBody> {
     )
 }
 
+fn upstream_error_message(error: &(dyn std::error::Error + 'static)) -> String {
+    let mut message = error.to_string();
+    let mut source = error.source();
+    while let Some(cause) = source {
+        message.push_str(": ");
+        message.push_str(&cause.to_string());
+        source = cause.source();
+    }
+    message
+}
+
 fn json_response(status: StatusCode, body: Vec<u8>) -> Response<ResponseBody> {
     Response::builder()
         .status(status)
         .header(http::header::CONTENT_TYPE, "application/json")
         .body(BoxBody::new(Full::new(Bytes::from(body))))
         .unwrap()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use hyper::service::service_fn;
+    use hyper_rustls::HttpsConnectorBuilder;
+    use hyper_util::client::legacy::Client;
+    use hyper_util::rt::{TokioExecutor, TokioIo};
+    use tokio::net::TcpListener;
+
+    #[tokio::test]
+    async fn forwards_http2_authority_without_a_duplicate_host() {
+        for method in [hyper::Method::GET, hyper::Method::POST] {
+            let upstream = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let upstream_addr = upstream.local_addr().unwrap();
+            let received_at = Arc::new(std::sync::Mutex::new(None));
+            let observed = received_at.clone();
+            let server = tokio::spawn(async move {
+                let (socket, _) = upstream.accept().await.unwrap();
+                let service = service_fn(move |request: Request<Incoming>| {
+                    *observed.lock().unwrap() = Some(time::OffsetDateTime::now_utc());
+                    async move {
+                        assert_eq!(request.uri().authority().unwrap().as_str(), upstream_addr.to_string());
+                        assert!(!request.headers().contains_key(HOST));
+                        assert!(!request.headers().contains_key("x-ashkelon-launch"));
+                        let body = request.into_body().collect().await.unwrap().to_bytes();
+                        Ok::<_, Infallible>(Response::new(Full::new(body)))
+                    }
+                });
+                hyper::server::conn::http2::Builder::new(TokioExecutor::new())
+                    .serve_connection(TokioIo::new(socket), service)
+                    .await
+                    .unwrap();
+            });
+            let connector = HttpsConnectorBuilder::new()
+                .with_webpki_roots()
+                .https_or_http()
+                .enable_http2()
+                .build();
+            let client = Client::builder(TokioExecutor::new()).http2_only(true).build(connector);
+            let state = tempfile::tempdir().unwrap();
+            let cfg = Arc::new(Config {
+                log_dir: Some(state.path().join("logs")),
+                state_dir: Some(state.path().join("state")),
+                routes: vec![crate::config::RouteConfig {
+                    name: "test".into(),
+                    upstream: format!("http://{upstream_addr}"),
+                }],
+                ..Config::default()
+            });
+            let engine = Engine::new(cfg.clone());
+            let telemetry = Arc::new(Writer::new(cfg.log_dir()).unwrap());
+            let tracker = Arc::new(Tracker::default());
+            let relay = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let relay_addr = relay.local_addr().unwrap();
+            let serve_cfg = cfg.clone();
+            let serve_tracker = tracker.clone();
+            let relay_task = tokio::spawn(async move {
+                let (socket, _) = relay.accept().await.unwrap();
+                let service = service_fn(move |req| {
+                    handle(
+                        req,
+                        serve_cfg.clone(),
+                        engine.clone(),
+                        client.clone(),
+                        telemetry.clone(),
+                        serve_tracker.clone(),
+                    )
+                });
+                hyper::server::conn::http1::Builder::new()
+                    .serve_connection(TokioIo::new(socket), service)
+                    .await
+                    .unwrap();
+            });
+            let response = reqwest::Client::new()
+                .request(method, format!("http://{relay_addr}/test/probe"))
+                .header("Host", "incoming.invalid")
+                .header("x-ashkelon-launch", "origin-launch")
+                .body("{}")
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            assert_eq!(response.bytes().await.unwrap(), "{}");
+            tracker.wait_idle(std::time::Duration::from_secs(5)).await;
+            let log = std::fs::read_dir(cfg.log_dir())
+                .unwrap()
+                .next()
+                .unwrap()
+                .unwrap()
+                .path();
+            let record: CallRecord = serde_json::from_str(std::fs::read_to_string(log).unwrap().trim()).unwrap();
+            assert_eq!(record.session.launch.as_deref(), Some("origin-launch"));
+            let started_at =
+                time::OffsetDateTime::parse(&record.ts, &time::format_description::well_known::Rfc3339).unwrap();
+            assert!(started_at <= received_at.lock().unwrap().unwrap());
+            relay_task.abort();
+            server.abort();
+        }
+    }
 }

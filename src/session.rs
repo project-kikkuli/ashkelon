@@ -19,12 +19,18 @@ const SESSION_HEADERS: &[&str] = &[
     "x-session-id",
     "conversation_id",
     "x-claude-code-session-id",
+    "x-opencode-session",
 ];
 
 /// Identifies one agent conversation from a request. `body` is the decoded (uncompressed) body.
 pub fn derive(launch: Option<&str>, wire: Wire, headers: &HeaderMap, body: &[u8]) -> SessionKey {
     SessionKey {
-        launch: launch.map(str::to_string),
+        launch: launch.map(str::to_string).or_else(|| {
+            headers
+                .get("x-ashkelon-launch")
+                .and_then(|v| v.to_str().ok())
+                .map(str::to_string)
+        }),
         harness: harness_from_user_agent(headers),
         session: session_id(wire, headers, body),
     }
@@ -220,6 +226,18 @@ mod tests {
         h.insert("x-session-id", "abc-123".parse().unwrap());
         let key = derive(None, Wire::OpenAiChat, &h, b"{}");
         assert_eq!(key.session, "abc-123");
+    }
+
+    #[test]
+    fn native_session_headers_preserve_conversation_identity() {
+        for name in ["x-opencode-session", "x-session-id", "session_id"] {
+            let mut headers = HeaderMap::new();
+            headers.insert(name, "native-session".parse().unwrap());
+            headers.insert(http::header::USER_AGENT, "opencode/1.0".parse().unwrap());
+            let key = derive(None, Wire::OpenAiChat, &headers, b"{}");
+            assert_eq!(key.session, "native-session");
+            assert_eq!(key.harness.as_deref(), Some("opencode"));
+        }
     }
 
     #[test]
