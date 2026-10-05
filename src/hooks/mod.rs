@@ -497,7 +497,7 @@ impl Engine {
         let len = self.injector.conversation_len(wire, body)?;
         let anchor = len.checked_sub(1)?;
 
-        let new_pings: Vec<Ping> = state.outbox.drain(..).collect();
+        let new_pings = std::mem::take(&mut state.outbox);
         let new_pins: Vec<PinnedPing> = new_pings.iter().map(|p| ping::into_pinned(p, anchor)).collect();
 
         let mut all_pins = state.delivered.clone();

@@ -275,11 +275,48 @@ fn ori_routes_openrouter_with_api_v1_suffix() {
 }
 
 #[test]
-fn cursor_is_explicitly_unsupported() {
-    let dir = state_dir("cursor");
-    let err = launch::plan("cursor", BASE, LAUNCH, &[], &options(&dir)).unwrap_err();
-    assert!(err.to_string().to_lowercase().contains("cursor"));
-    let _ = std::fs::remove_dir_all(&dir);
+fn cursor_preserves_native_configuration_while_routing_model_calls() {
+    let previous = std::env::var_os("CURSOR_CONFIG_DIR");
+    for exists in [false, true] {
+        let root = tempfile::tempdir().unwrap();
+        let real = root.path().join("cursor");
+        std::fs::create_dir(&real).unwrap();
+        let config = real.join("cli-config.json");
+        let original = br#"{"selectedModel":{"modelId":"chosen"},"permissions":{"allow":["Read"]},"network":{"useHttp1ForAgent":false}}"#;
+        if exists {
+            std::fs::write(&config, original).unwrap();
+        }
+        std::fs::write(real.join("credentials.json"), "fixture-credentials").unwrap();
+        std::env::set_var("CURSOR_CONFIG_DIR", &real);
+        let args = vec!["--print".into(), "prompt with spaces".into()];
+        let plan = launch::plan("cursor", BASE, LAUNCH, &args, &options(root.path())).unwrap();
+        assert_eq!(plan.program, "cursor-agent");
+        assert_eq!(plan.args, args);
+        assert_eq!(
+            env_value(&plan.env, "CURSOR_API_ENDPOINT"),
+            Some("http://localhost:9999/s/deadbeef/cursor")
+        );
+        let overlay = plan.overlay_home.unwrap();
+        let document: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(overlay.overlay_dir.join("cli-config.json")).unwrap()).unwrap();
+        assert_eq!(document["network"]["useHttp1ForAgent"], true);
+        assert_eq!(
+            std::fs::read_to_string(overlay.overlay_dir.join("credentials.json")).unwrap(),
+            "fixture-credentials"
+        );
+        if exists {
+            assert_eq!(document["selectedModel"]["modelId"], "chosen");
+            assert_eq!(document["permissions"]["allow"][0], "Read");
+            assert_eq!(std::fs::read(&config).unwrap(), original);
+        } else {
+            assert!(!config.exists());
+        }
+    }
+    if let Some(previous) = previous {
+        std::env::set_var("CURSOR_CONFIG_DIR", previous);
+    } else {
+        std::env::remove_var("CURSOR_CONFIG_DIR");
+    }
 }
 
 #[test]
