@@ -166,6 +166,7 @@ on stdin, text on stdout); see [`examples/hooks/`](examples/hooks/).
 | `usage` | `input_tokens`, `output_tokens`, `cache_read_tokens`, `cache_write_tokens`, `reasoning_tokens`, `reasoning_estimated` |
 | `ttfb_ms`, `total_ms`, `request_bytes`, `response_bytes` | Timing and size |
 | `transforms`, `pings_injected`, `rule`, `error` | What ashkelon did to the call |
+| `connection_retired` | A remote HTTP/2 protocol error excluded this connection from future reuse; the failed request is not replayed |
 
 Hook runs are logged to `<log_dir>/hooks-YYYY-MM-DD.jsonl`. The default `log_dir` is `~/Library/Application Support/ashkelon/logs` on macOS and `$XDG_STATE_HOME/ashkelon/logs` elsewhere.
 

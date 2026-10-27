@@ -5,6 +5,9 @@ mod pipeline;
 mod route;
 mod tracker;
 
+#[cfg(test)]
+mod recovery_tests;
+
 use std::sync::Arc;
 
 use hyper::service::service_fn;

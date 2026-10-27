@@ -39,6 +39,8 @@ pub struct CallRecord {
     /// The rule that rejected or cut this call, if any.
     pub rule: Option<String>,
     pub error: Option<String>,
+    #[serde(default)]
+    pub connection_retired: bool,
 }
 
 pub fn now_ts() -> String {
@@ -155,6 +157,7 @@ mod tests {
             pings_injected: Vec::new(),
             rule: None,
             error: None,
+            connection_retired: false,
         }
     }
 

@@ -8,6 +8,7 @@ use http::{HeaderMap, HeaderValue, Request, Response, StatusCode};
 use http_body_util::combinators::BoxBody;
 use http_body_util::{BodyExt, Full, StreamBody};
 use hyper::body::{Frame, Incoming};
+use hyper_util::client::legacy::connect::{capture_connection, CaptureConnection};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
@@ -21,6 +22,7 @@ use crate::usage::{self, Usage};
 use crate::wire::Wire;
 
 use super::channel_trust;
+use super::client;
 use super::client::UpstreamClient;
 use super::decode::{decode_all, Encoding, StreamDecoder};
 use super::route;
@@ -178,6 +180,7 @@ pub async fn handle(
             pings_injected: Vec::new(),
             rule: Some(rule),
             error: None,
+            connection_retired: false,
         };
         log_record(&telemetry, &record);
         if cfg.log_bodies {
@@ -223,16 +226,25 @@ pub async fn handle(
 
     let mut builder = Request::builder().method(method.clone()).uri(upstream_uri);
     *builder.headers_mut().unwrap() = out_headers;
-    let upstream_req = match builder.body(Full::new(Bytes::from(outgoing_body))) {
+    let mut upstream_req = match builder.body(Full::new(Bytes::from(outgoing_body))) {
         Ok(r) => r,
         Err(err) => return Ok(bad_gateway(&format!("building upstream request: {err}"))),
     };
 
+    let upstream_connection = capture_connection(&mut upstream_req);
     let t0 = Instant::now();
     let upstream_resp = match client.request(upstream_req).await {
         Ok(r) => r,
         Err(err) => {
             let detail = upstream_error_message(&err);
+            let connection_retired = client::retire_on_protocol_error(&err, err.connect_info());
+            if connection_retired {
+                tracing::warn!(
+                    call_id,
+                    route = parsed.route,
+                    "retired upstream connection after remote PROTOCOL_ERROR"
+                );
+            }
             let record = CallRecord {
                 ts: started_at.clone(),
                 call_id: call_id.clone(),
@@ -255,6 +267,7 @@ pub async fn handle(
                 pings_injected,
                 rule: None,
                 error: Some(format!("upstream connect failed: {detail}")),
+                connection_retired,
             };
             log_record(&telemetry, &record);
             return Ok(bad_gateway(&format!("connecting upstream: {detail}")));
@@ -299,6 +312,7 @@ pub async fn handle(
             pings_injected,
             t0,
             incoming_body,
+            upstream_connection,
             response_encoding,
             tx,
             engine: engine_bg,
@@ -333,6 +347,7 @@ struct ForwardArgs {
     pings_injected: Vec<String>,
     t0: Instant,
     incoming_body: Incoming,
+    upstream_connection: CaptureConnection,
     response_encoding: Encoding,
     tx: mpsc::Sender<Result<Frame<Bytes>, Infallible>>,
     engine: Arc<Engine>,
@@ -352,13 +367,23 @@ async fn forward_response(args: ForwardArgs) {
     let mut response_bytes: u64 = 0;
     let mut cut_rule: Option<String> = None;
     let mut error: Option<String> = None;
+    let mut connection_retired = false;
     let mut response_log_bytes = if args.log_bodies { Some(Vec::new()) } else { None };
 
     loop {
         let frame = match http_body_util::BodyExt::frame(&mut incoming_body).await {
             Some(Ok(frame)) => frame,
             Some(Err(err)) => {
-                error = Some(format!("upstream read error: {err}"));
+                connection_retired =
+                    client::retire_on_protocol_error(&err, args.upstream_connection.connection_metadata().as_ref());
+                if connection_retired {
+                    tracing::warn!(
+                        call_id = args.call_id,
+                        route = args.route,
+                        "retired upstream connection after remote PROTOCOL_ERROR"
+                    );
+                }
+                error = Some(format!("upstream read error: {}", upstream_error_message(&err)));
                 break;
             }
             None => break,
@@ -484,6 +509,7 @@ async fn forward_response(args: ForwardArgs) {
         pings_injected: args.pings_injected,
         rule: cut_rule,
         error,
+        connection_retired,
     };
 
     log_record(&args.telemetry, &record);

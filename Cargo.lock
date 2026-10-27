@@ -108,6 +108,7 @@ dependencies = [
  "dirs",
  "flate2",
  "futures-util",
+ "h2",
  "hex",
  "http",
  "http-body",

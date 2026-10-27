@@ -3,7 +3,7 @@ use std::sync::Arc;
 use bytes::Bytes;
 use http_body_util::Full;
 use hyper_rustls::{HttpsConnector, HttpsConnectorBuilder};
-use hyper_util::client::legacy::connect::HttpConnector;
+use hyper_util::client::legacy::connect::{Connected, HttpConnector};
 use hyper_util::client::legacy::Client;
 use hyper_util::rt::TokioExecutor;
 use rustls::pki_types::CertificateDer;
@@ -28,6 +28,22 @@ pub fn build() -> anyhow::Result<UpstreamClient> {
         .enable_http2()
         .build();
     Ok(Client::builder(TokioExecutor::new()).build(https))
+}
+
+pub(super) fn retire_on_protocol_error(
+    error: &(dyn std::error::Error + 'static),
+    connection: Option<&Connected>,
+) -> bool {
+    let remote_protocol_error = std::iter::successors(Some(error), |cause| cause.source())
+        .filter_map(|cause| cause.downcast_ref::<h2::Error>())
+        .any(|error| error.is_remote() && error.reason() == Some(h2::Reason::PROTOCOL_ERROR));
+    if remote_protocol_error {
+        if let Some(connection) = connection {
+            connection.poison();
+            return true;
+        }
+    }
+    false
 }
 
 /// The platform store can come back partial (e.g. a keychain not yet readable at boot), so it only
