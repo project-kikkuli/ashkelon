@@ -203,7 +203,10 @@ async fn recovery_case(reason: Reason, after_headers: bool, retired: bool) {
         assert_eq!(failure.status(), 200);
         assert_eq!(failure.chunk().await.unwrap().unwrap(), "partial");
         upstream.reset_stream.notify_one();
-        assert!(failure.chunk().await.unwrap().is_none());
+        assert!(
+            failure.chunk().await.is_err(),
+            "a mid-body upstream reset aborts the client stream"
+        );
     } else {
         assert_eq!(failure.status(), 502);
         assert!(failure.text().await.unwrap().contains("stream error received"));

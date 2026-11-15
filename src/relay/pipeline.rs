@@ -28,7 +28,9 @@ use super::decode::{decode_all, Encoding, StreamDecoder};
 use super::route;
 use super::tracker::Tracker;
 
-pub type ResponseBody = BoxBody<Bytes, Infallible>;
+/// A body error makes hyper abort the client's response instead of ending it cleanly.
+pub type BodyError = Box<dyn std::error::Error + Send + Sync>;
+pub type ResponseBody = BoxBody<Bytes, BodyError>;
 
 /// Fault-injection switches for integration tests to prove specific steps of ashkelon's own
 /// optional work fail open when they panic. Only compiled with `test-util`, which is enabled
@@ -224,27 +226,91 @@ pub async fn handle(
         return Ok(bad_gateway("invalid upstream route"));
     };
 
-    let mut builder = Request::builder().method(method.clone()).uri(upstream_uri);
-    *builder.headers_mut().unwrap() = out_headers;
-    let mut upstream_req = match builder.body(Full::new(Bytes::from(outgoing_body))) {
-        Ok(r) => r,
-        Err(err) => return Ok(bad_gateway(&format!("building upstream request: {err}"))),
+    let build_request = || {
+        let mut builder = Request::builder().method(method.clone()).uri(upstream_uri.clone());
+        *builder.headers_mut().unwrap() = out_headers.clone();
+        builder.body(Full::new(Bytes::from(outgoing_body.clone())))
+    };
+    if let Err(err) = build_request() {
+        return Ok(bad_gateway(&format!("building upstream request: {err}")));
+    }
+
+    let t0 = Instant::now();
+    let mut connect_retried = false;
+    let (upstream_resp, upstream_connection) = loop {
+        let mut upstream_req = build_request().expect("request builds");
+        let upstream_connection = capture_connection(&mut upstream_req);
+        let err = match client.request(upstream_req).await {
+            Ok(r) => break (r, upstream_connection),
+            Err(err) => err,
+        };
+        // Connect errors mean no request byte left this process, so a retry cannot duplicate it.
+        if err.is_connect() && !connect_retried {
+            connect_retried = true;
+            tracing::warn!(
+                call_id,
+                route = parsed.route,
+                error = %upstream_error_message(&err),
+                "upstream connect failed; retrying once"
+            );
+            tokio::time::sleep(client::CONNECT_RETRY_DELAY).await;
+            continue;
+        }
+        let detail = upstream_error_message(&err);
+        let kind = if err.is_connect() {
+            "upstream connect failed"
+        } else {
+            "upstream closed before response"
+        };
+        let connection_retired = client::retire_on_protocol_error(&err, err.connect_info());
+        if connection_retired {
+            tracing::warn!(
+                call_id,
+                route = parsed.route,
+                "retired upstream connection after remote PROTOCOL_ERROR"
+            );
+        }
+        let record = CallRecord {
+            ts: started_at.clone(),
+            call_id: call_id.clone(),
+            session: key,
+            route: parsed.route,
+            wire,
+            method: method.to_string(),
+            path,
+            status: 502,
+            model: None,
+            stop_reason: None,
+            usage: Usage::default(),
+            tool_calls: Vec::new(),
+            turn_end: false,
+            ttfb_ms: None,
+            total_ms: t0.elapsed().as_millis() as u64,
+            request_bytes,
+            response_bytes: 0,
+            transforms: transform_names,
+            pings_injected,
+            rule: None,
+            error: Some(format!(
+                "{kind}{}: {detail}",
+                if connect_retried { " after retry" } else { "" }
+            )),
+            connection_retired,
+        };
+        log_record(&telemetry, &record);
+        return Ok(bad_gateway(&format!("{kind}: {detail}")));
     };
 
-    let upstream_connection = capture_connection(&mut upstream_req);
-    let t0 = Instant::now();
-    let upstream_resp = match client.request(upstream_req).await {
-        Ok(r) => r,
-        Err(err) => {
+    let (resp_parts, mut incoming_body) = upstream_resp.into_parts();
+    // Nothing has reached the client yet, so a body that fails before its first frame can still
+    // become an honest 502 instead of a 200 whose stream is then cut.
+    let first_frame = match incoming_body.frame().await {
+        Some(Ok(frame)) => Some(frame),
+        None => None,
+        Some(Err(err)) => {
             let detail = upstream_error_message(&err);
-            let connection_retired = client::retire_on_protocol_error(&err, err.connect_info());
-            if connection_retired {
-                tracing::warn!(
-                    call_id,
-                    route = parsed.route,
-                    "retired upstream connection after remote PROTOCOL_ERROR"
-                );
-            }
+            let connection_retired =
+                client::retire_on_protocol_error(&err, upstream_connection.connection_metadata().as_ref());
             let record = CallRecord {
                 ts: started_at.clone(),
                 call_id: call_id.clone(),
@@ -266,15 +332,13 @@ pub async fn handle(
                 transforms: transform_names,
                 pings_injected,
                 rule: None,
-                error: Some(format!("upstream connect failed: {detail}")),
+                error: Some(format!("upstream failed before response body: {detail}")),
                 connection_retired,
             };
             log_record(&telemetry, &record);
-            return Ok(bad_gateway(&format!("connecting upstream: {detail}")));
+            return Ok(bad_gateway(&format!("upstream failed before response body: {detail}")));
         }
     };
-
-    let (resp_parts, incoming_body) = upstream_resp.into_parts();
     let status = resp_parts.status;
     let response_encoding = Encoding::from_header(header_str(&resp_parts.headers, "content-encoding"));
     let mut client_headers = strip_hop_by_hop(&resp_parts.headers);
@@ -284,7 +348,7 @@ pub async fn handle(
         client_headers.remove(http::header::CONTENT_LENGTH);
     }
 
-    let (tx, rx) = mpsc::channel::<Result<Frame<Bytes>, Infallible>>(8);
+    let (tx, rx) = mpsc::channel::<Result<Frame<Bytes>, BodyError>>(8);
 
     let log_bodies = cfg.log_bodies;
     let request_log_bytes = if log_bodies { Some(raw_request.to_vec()) } else { None };
@@ -315,6 +379,7 @@ pub async fn handle(
             upstream_connection,
             response_encoding,
             tx,
+            first_frame,
             engine: engine_bg,
             telemetry: telemetry_bg,
             cfg: cfg_rules,
@@ -349,7 +414,8 @@ struct ForwardArgs {
     incoming_body: Incoming,
     upstream_connection: CaptureConnection,
     response_encoding: Encoding,
-    tx: mpsc::Sender<Result<Frame<Bytes>, Infallible>>,
+    tx: mpsc::Sender<Result<Frame<Bytes>, BodyError>>,
+    first_frame: Option<Frame<Bytes>>,
     engine: Arc<Engine>,
     telemetry: Arc<Writer>,
     cfg: Arc<Config>,
@@ -369,9 +435,16 @@ async fn forward_response(args: ForwardArgs) {
     let mut error: Option<String> = None;
     let mut connection_retired = false;
     let mut response_log_bytes = if args.log_bodies { Some(Vec::new()) } else { None };
+    let mut pending_frame = args.first_frame;
+    // Set when the upstream body fails mid-stream: the client's stream is aborted, not ended.
+    let mut abort_client: Option<BodyError> = None;
 
     loop {
-        let frame = match http_body_util::BodyExt::frame(&mut incoming_body).await {
+        let next = match pending_frame.take() {
+            Some(frame) => Some(Ok(frame)),
+            None => http_body_util::BodyExt::frame(&mut incoming_body).await,
+        };
+        let frame = match next {
             Some(Ok(frame)) => frame,
             Some(Err(err)) => {
                 connection_retired =
@@ -383,7 +456,9 @@ async fn forward_response(args: ForwardArgs) {
                         "retired upstream connection after remote PROTOCOL_ERROR"
                     );
                 }
-                error = Some(format!("upstream read error: {}", upstream_error_message(&err)));
+                let detail = upstream_error_message(&err);
+                error = Some(format!("upstream dropped mid-body: {detail}"));
+                abort_client = Some(format!("upstream dropped mid-body: {detail}").into());
                 break;
             }
             None => break,
@@ -444,6 +519,9 @@ async fn forward_response(args: ForwardArgs) {
             error.get_or_insert_with(|| "client disconnected".to_string());
             break;
         }
+    }
+    if let Some(err) = abort_client {
+        let _ = args.tx.send(Err(err)).await;
     }
     drop(args.tx);
     drop(incoming_body);
@@ -627,7 +705,7 @@ fn json_response(status: StatusCode, body: Vec<u8>) -> Response<ResponseBody> {
     Response::builder()
         .status(status)
         .header(http::header::CONTENT_TYPE, "application/json")
-        .body(BoxBody::new(Full::new(Bytes::from(body))))
+        .body(Full::new(Bytes::from(body)).map_err(|e: Infallible| match e {}).boxed())
         .unwrap()
 }
 

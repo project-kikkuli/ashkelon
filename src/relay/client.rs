@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::Duration;
 
 use bytes::Bytes;
 use http_body_util::Full;
@@ -8,6 +9,12 @@ use hyper_util::client::legacy::Client;
 use hyper_util::rt::TokioExecutor;
 use rustls::pki_types::CertificateDer;
 use rustls::{ClientConfig, RootCertStore};
+
+/// Successful upstream connects take milliseconds; a connect still pending after this is a stall.
+pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
+
+/// Pause before the single connect retry, so a connector that just dropped has a moment to recover.
+pub const CONNECT_RETRY_DELAY: Duration = Duration::from_millis(250);
 
 /// Request bodies are always fully buffered before ashkelon forwards them, so `Full` is enough —
 /// only responses need to stream.
@@ -21,12 +28,15 @@ pub fn build() -> anyhow::Result<UpstreamClient> {
         .with_safe_default_protocol_versions()?
         .with_root_certificates(roots)
         .with_no_client_auth();
+    let mut http = HttpConnector::new();
+    http.enforce_http(false);
+    http.set_connect_timeout(Some(CONNECT_TIMEOUT));
     let https = HttpsConnectorBuilder::new()
         .with_tls_config(tls)
         .https_or_http()
         .enable_http1()
         .enable_http2()
-        .build();
+        .wrap_connector(http);
     Ok(Client::builder(TokioExecutor::new()).build(https))
 }
 
