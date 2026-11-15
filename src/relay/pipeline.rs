@@ -226,19 +226,19 @@ pub async fn handle(
         return Ok(bad_gateway("invalid upstream route"));
     };
 
+    let outgoing_body = Bytes::from(outgoing_body);
     let build_request = || {
         let mut builder = Request::builder().method(method.clone()).uri(upstream_uri.clone());
         *builder.headers_mut().unwrap() = out_headers.clone();
-        builder.body(Full::new(Bytes::from(outgoing_body.clone())))
+        builder.body(Full::new(outgoing_body.clone()))
     };
-    if let Err(err) = build_request() {
-        return Ok(bad_gateway(&format!("building upstream request: {err}")));
-    }
-
     let t0 = Instant::now();
     let mut connect_retried = false;
     let (upstream_resp, upstream_connection) = loop {
-        let mut upstream_req = build_request().expect("request builds");
+        let mut upstream_req = match build_request() {
+            Ok(r) => r,
+            Err(err) => return Ok(bad_gateway(&format!("building upstream request: {err}"))),
+        };
         let upstream_connection = capture_connection(&mut upstream_req);
         let err = match client.request(upstream_req).await {
             Ok(r) => break (r, upstream_connection),
@@ -304,7 +304,37 @@ pub async fn handle(
     let (resp_parts, mut incoming_body) = upstream_resp.into_parts();
     // Nothing has reached the client yet, so a body that fails before its first frame can still
     // become an honest 502 instead of a 200 whose stream is then cut.
-    let first_frame = match incoming_body.frame().await {
+    // If the client goes away during this wait hyper drops this future; the guard still logs the call.
+    let mut abandoned = AbandonedCall(Some((
+        telemetry.clone(),
+        CallRecord {
+            ts: started_at.clone(),
+            call_id: call_id.clone(),
+            session: key.clone(),
+            route: parsed.route.clone(),
+            wire,
+            method: method.to_string(),
+            path: path.clone(),
+            status: resp_parts.status.as_u16(),
+            model: None,
+            stop_reason: None,
+            usage: Usage::default(),
+            tool_calls: Vec::new(),
+            turn_end: false,
+            ttfb_ms: None,
+            total_ms: 0,
+            request_bytes,
+            response_bytes: 0,
+            transforms: transform_names.clone(),
+            pings_injected: pings_injected.clone(),
+            rule: None,
+            error: Some("client disconnected before response".to_string()),
+            connection_retired: false,
+        },
+    )));
+    let first = incoming_body.frame().await;
+    abandoned.0 = None;
+    let first_frame = match first {
         Some(Ok(frame)) => Some(frame),
         None => None,
         Some(Err(err)) => {
@@ -396,6 +426,16 @@ pub async fn handle(
         .unwrap();
     *response.headers_mut() = client_headers;
     Ok(response)
+}
+
+struct AbandonedCall(Option<(Arc<Writer>, CallRecord)>);
+
+impl Drop for AbandonedCall {
+    fn drop(&mut self) {
+        if let Some((telemetry, record)) = self.0.take() {
+            log_record(&telemetry, &record);
+        }
+    }
 }
 
 struct ForwardArgs {

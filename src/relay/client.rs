@@ -10,7 +10,8 @@ use hyper_util::rt::TokioExecutor;
 use rustls::pki_types::CertificateDer;
 use rustls::{ClientConfig, RootCertStore};
 
-/// Successful upstream connects take milliseconds; a connect still pending after this is a stall.
+/// Bounds the TCP connect only. Successful connects take milliseconds; a connect pending after
+/// this is a stall. A TLS handshake that hangs after the TCP connect is not bounded by it.
 pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
 
 /// Pause before the single connect retry, so a connector that just dropped has a moment to recover.
