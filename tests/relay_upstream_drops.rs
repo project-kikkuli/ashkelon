@@ -10,7 +10,7 @@ use hyper::{Request, Response, StatusCode};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
-use relay_support::{full_body, spawn_relay, wait_for_records};
+use relay_support::{full_body, spawn_relay, spawn_relay_to_url, wait_for_records, RawClient};
 
 async fn post(relay: SocketAddr) -> Result<Response<hyper::body::Incoming>, hyper_util::client::legacy::Error> {
     let client =
@@ -180,4 +180,62 @@ async fn connect_that_fails_twice_is_a_502_logged_as_a_connect_failure_after_ret
         .as_str()
         .unwrap()
         .starts_with("upstream connect failed after retry"));
+}
+
+#[tokio::test]
+async fn a_stalled_tls_handshake_times_out_and_is_retried_as_a_connect_failure() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let accepted = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let counter = accepted.clone();
+    tokio::spawn(async move {
+        let mut held = Vec::new();
+        loop {
+            let (socket, _) = listener.accept().await.unwrap();
+            counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            held.push(socket);
+        }
+    });
+    let (relay, log_dir, _engine) = spawn_relay_to_url(format!("https://{addr}"), false).await;
+
+    let started = std::time::Instant::now();
+    let resp = post(relay).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::BAD_GATEWAY);
+    assert!(started.elapsed() < Duration::from_secs(15));
+    assert_eq!(accepted.load(std::sync::atomic::Ordering::SeqCst), 2, "one retry");
+
+    let records = wait_for_records(log_dir.path(), 1).await;
+    let error = records[0]["error"].as_str().unwrap();
+    assert!(error.starts_with("upstream connect failed after retry"), "{error}");
+    assert!(error.contains("timed out"), "{error}");
+}
+
+#[tokio::test]
+async fn a_client_that_leaves_while_the_first_byte_is_pending_is_still_logged() {
+    let upstream = raw_upstream(|mut socket| async move {
+        socket
+            .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 10\r\n\r\n")
+            .await
+            .unwrap();
+        socket.flush().await.unwrap();
+        tokio::time::sleep(Duration::from_secs(30)).await;
+        drop(socket);
+    })
+    .await;
+    let (relay, log_dir) = spawn_relay(upstream, false).await;
+
+    let mut client = RawClient::connect(relay).await;
+    let req = Request::builder()
+        .method("POST")
+        .uri("/test/v1/messages")
+        .body(Full::new(Bytes::from_static(b"{}")))
+        .unwrap();
+    let pending = tokio::spawn(client.sender.send_request(req));
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    client.disconnect();
+    pending.abort();
+
+    let records = wait_for_records(log_dir.path(), 1).await;
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0]["error"], "client disconnected before response");
 }

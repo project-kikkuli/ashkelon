@@ -9,9 +9,10 @@ use hyper_util::client::legacy::Client;
 use hyper_util::rt::TokioExecutor;
 use rustls::pki_types::CertificateDer;
 use rustls::{ClientConfig, RootCertStore};
+use tower::Service;
 
-/// Bounds the TCP connect only. Successful connects take milliseconds; a connect pending after
-/// this is a stall. A TLS handshake that hangs after the TCP connect is not bounded by it.
+/// Bounds TCP connect plus TLS handshake. Successful connects take milliseconds; one still pending
+/// after this is a stall.
 pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
 
 /// Pause before the single connect retry, so a connector that just dropped has a moment to recover.
@@ -19,7 +20,9 @@ pub const CONNECT_RETRY_DELAY: Duration = Duration::from_millis(250);
 
 /// Request bodies are always fully buffered before ashkelon forwards them, so `Full` is enough —
 /// only responses need to stream.
-pub type UpstreamClient = Client<HttpsConnector<HttpConnector>, Full<Bytes>>;
+pub type BoundedConnector = Bounded<HttpsConnector<HttpConnector>>;
+
+pub type UpstreamClient = Client<BoundedConnector, Full<Bytes>>;
 
 /// Builds the client ashkelon uses to reach real providers: the bundled webpki roots plus whatever
 /// the platform store yields, http1/http2 negotiated via ALPN.
@@ -31,14 +34,51 @@ pub fn build() -> anyhow::Result<UpstreamClient> {
         .with_no_client_auth();
     let mut http = HttpConnector::new();
     http.enforce_http(false);
-    http.set_connect_timeout(Some(CONNECT_TIMEOUT));
     let https = HttpsConnectorBuilder::new()
         .with_tls_config(tls)
         .https_or_http()
         .enable_http1()
         .enable_http2()
         .wrap_connector(http);
-    Ok(Client::builder(TokioExecutor::new()).build(https))
+    Ok(Client::builder(TokioExecutor::new()).build(bounded(https)))
+}
+
+/// Wraps `connector` so a connect that does not finish within [`CONNECT_TIMEOUT`] fails as a
+/// connect error.
+pub fn bounded(connector: HttpsConnector<HttpConnector>) -> BoundedConnector {
+    Bounded(connector)
+}
+
+/// A connector whose whole connect (TCP plus TLS) is bounded by [`CONNECT_TIMEOUT`].
+#[derive(Clone)]
+pub struct Bounded<C>(C);
+
+type BoxError = Box<dyn std::error::Error + Send + Sync>;
+
+impl<C> Service<http::Uri> for Bounded<C>
+where
+    C: Service<http::Uri>,
+    C::Future: Send + 'static,
+    C::Error: Into<BoxError>,
+    C::Response: 'static,
+{
+    type Response = C::Response;
+    type Error = BoxError;
+    type Future = std::pin::Pin<Box<dyn std::future::Future<Output = Result<C::Response, BoxError>> + Send>>;
+
+    fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> std::task::Poll<Result<(), BoxError>> {
+        self.0.poll_ready(cx).map_err(Into::into)
+    }
+
+    fn call(&mut self, uri: http::Uri) -> Self::Future {
+        let connecting = self.0.call(uri);
+        Box::pin(async move {
+            match tokio::time::timeout(CONNECT_TIMEOUT, connecting).await {
+                Ok(connected) => connected.map_err(Into::into),
+                Err(_) => Err(format!("connect timed out after {}s", CONNECT_TIMEOUT.as_secs()).into()),
+            }
+        })
+    }
 }
 
 pub(super) fn retire_on_protocol_error(

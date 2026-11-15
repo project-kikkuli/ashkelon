@@ -787,7 +787,9 @@ mod tests {
                 .https_or_http()
                 .enable_http2()
                 .build();
-            let client = Client::builder(TokioExecutor::new()).http2_only(true).build(connector);
+            let client = Client::builder(TokioExecutor::new())
+                .http2_only(true)
+                .build(client::bounded(connector));
             let state = tempfile::tempdir().unwrap();
             let cfg = Arc::new(Config {
                 log_dir: Some(state.path().join("logs")),

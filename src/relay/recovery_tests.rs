@@ -17,7 +17,7 @@ use crate::config::{Config, RouteConfig};
 use crate::hooks::Engine;
 use crate::telemetry::{CallRecord, Writer};
 
-use super::{pipeline, Tracker};
+use super::{client, pipeline, Tracker};
 
 struct Upstream {
     address: SocketAddr,
@@ -153,7 +153,9 @@ async fn recovery_case(reason: Reason, after_headers: bool, retired: bool) {
         .https_or_http()
         .enable_http2()
         .build();
-    let upstream_client = Client::builder(TokioExecutor::new()).http2_only(true).build(connector);
+    let upstream_client = Client::builder(TokioExecutor::new())
+        .http2_only(true)
+        .build(client::bounded(connector));
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let relay_address = listener.local_addr().unwrap();
     let relay_tracker = tracker.clone();

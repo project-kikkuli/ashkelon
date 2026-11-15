@@ -72,6 +72,14 @@ pub async fn spawn_relay_with_engine(
     upstream: SocketAddr,
     log_bodies: bool,
 ) -> (SocketAddr, tempfile::TempDir, Arc<Engine>) {
+    spawn_relay_to_url(format!("http://{upstream}"), log_bodies).await
+}
+
+/// Same as [`spawn_relay_with_engine`], with the route's upstream given as a full base URL.
+pub async fn spawn_relay_to_url(
+    upstream_url: String,
+    log_bodies: bool,
+) -> (SocketAddr, tempfile::TempDir, Arc<Engine>) {
     let log_dir = tempfile::tempdir().expect("tempdir");
     let mut cfg = Config {
         log_dir: Some(log_dir.path().to_path_buf()),
@@ -81,7 +89,7 @@ pub async fn spawn_relay_with_engine(
     };
     cfg.routes.push(RouteConfig {
         name: "test".to_string(),
-        upstream: format!("http://{upstream}"),
+        upstream: upstream_url,
     });
 
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind relay");
